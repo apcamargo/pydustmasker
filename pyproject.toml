@@ -9,6 +9,9 @@ authors = [{ name = "Antonio Camargo", email = "antoniop.camargo@gmail.com" }]
 license = "MIT"
 readme = "README.md"
 
+[project.urls]
+Home = "https://github.com/apcamargo/pydustmasker"
+
 [tool.maturin]
 module-name = "pydustmasker._pydustmasker"
 binding = "pyo3"
