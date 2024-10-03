@@ -8,7 +8,7 @@ class DustMasker:
     score_threshold: int
     intervals: Sequence[tuple[int, int]]
     def __init__(
-        self, sequence: str, window_size: int, score_threshold: int
+        self, sequence: str, window_size: int = 64, score_threshold: int = 20
     ) -> None: ...
     @property
     def n_masked_bases(self) -> int: ...
