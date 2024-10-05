@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Added a home URL to `pyproject.toml`.
 
+### Changed
+- Added `Cargo.lock` to `.gitignore`.
+
 ## [1.0.0] - 2024-10-02
 ### Added
 - First release.
