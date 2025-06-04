@@ -14,6 +14,7 @@ const ENCODING_LOOKUP: [u8; 256] = {
     lookup[b'c' as usize] = 1;
     lookup[b'g' as usize] = 2;
     lookup[b't' as usize] = 3;
+    lookup[b'N' as usize] = 0; // this is a work around 
     lookup
 };
 
