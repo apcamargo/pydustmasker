@@ -40,3 +40,16 @@ def test_score_threshold():
     masker = DustMasker("TACCCCCCCGCGTTTTTTT", window_size=64, score_threshold=128)
     assert masker.score_threshold == 128
     assert masker.intervals == []
+
+
+def test_ambigious():
+    # no ambiguous
+    seq1 = "GCCAGGCTGGCCAAGGAGATCttttttttttttttttttttttttAAGAGACCATGGCATGCACTGGCCAAGGAGATCttttttttttttttttttttttttAAGA"
+    # with ambiguous
+    seq2 = "GCCAGGCTGGCCAAGGAGATTCttttttttttttttttttttttttAAGAGCCARYCTGGCCAAGGAGANTCttttttttttttttttttttttttAAGA"
+    # with ambiguous and masks
+    seq3 = "GCCAGGCTGGCCAAGGAGATTCttttttttttttttttttttttttAFGAGCCAGGCTGGCCAAGGAGANTCtttttttttnNnttttttttAAGA"
+
+    assert DustMasker(seq1, window_size=64).intervals == [(21, 45), (78, 102)]
+    assert DustMasker(seq2, window_size=64).intervals == [(22, 46), (72, 96)]
+    assert DustMasker(seq3, window_size=64).intervals == [(22, 46), (72, 81), (84, 92)]

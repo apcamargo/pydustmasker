@@ -14,10 +14,6 @@ const ENCODING_LOOKUP: [u8; 256] = {
     lookup[b'c' as usize] = 1;
     lookup[b'g' as usize] = 2;
     lookup[b't' as usize] = 3;
-    // Treat N bases as A to prevent prevent out of range masks.
-    // This is a workaround suggested in: https://github.com/lh3/sdust/issues/2
-    lookup[b'N' as usize] = 0;
-    lookup[b'n' as usize] = 0;
     lookup
 };
 
@@ -113,8 +109,10 @@ impl<'a> SymmetricDust<'a> {
                     }
                 }
             } else {
-                // A `N` resets the sequence
-                // When we are there (N or end of seq), we empty the intervals found so far
+                // suggested fix for Ambiguous nucleotides causing end ranges falling outside of the sequence
+                // https://github.com/lh3/sdust/issues/2
+                // A `N` (or end‐of‐seq) resets the sequence:
+                // 1) flush any pending perfect intervals
                 let mut window_start = if l > self.window_size - 1 {
                     l - self.window_size + 1
                 } else {
@@ -126,8 +124,17 @@ impl<'a> SymmetricDust<'a> {
                     self.save_masked_regions(window_start);
                 }
 
+                // 2) reset the local context
                 l = 0;
                 triplet = 0;
+
+                // 3) clear the sliding window and zero out all counts
+                self.window.clear();
+                self.cw.fill(0);
+                self.cv.fill(0);
+                self.rw = 0;
+                self.rv = 0;
+                self.biggest_num_triplets = 0;
             }
         }
     }
