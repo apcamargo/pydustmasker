@@ -1,6 +1,6 @@
 mod sdust;
 
-use crate::sdust::SymmetricDust;
+use crate::sdust::{SymmetricDust, SymmetricDustOptions};
 use pyo3::{exceptions::PyValueError, prelude::*};
 use thiserror::Error;
 
@@ -87,7 +87,13 @@ impl DustMasker {
     fn new(sequence: String, window_size: usize, score_threshold: usize) -> PyResult<DustMasker> {
         validate_inputs(&sequence, window_size)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        let intervals = SymmetricDust::process(sequence.as_bytes(), window_size, score_threshold);
+        let intervals = SymmetricDust::process(
+            sequence.as_bytes(),
+            SymmetricDustOptions {
+                window_size,
+                score_threshold,
+            },
+        );
         Ok(DustMasker {
             sequence,
             window_size,
