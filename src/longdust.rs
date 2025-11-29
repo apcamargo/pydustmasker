@@ -79,7 +79,7 @@ impl Default for LongdustOptions {
 
 #[derive(Debug)]
 pub struct Longdust {
-    /// Parameters struct
+    // Parameters struct
     opts: LongdustOptions,
     f: Vec<f64>,
     c: Vec<f64>,
@@ -96,7 +96,7 @@ pub struct Longdust {
 }
 
 impl Longdust {
-    /// Main entry point using the Options struct
+    /// Initialize and run the Longdust algorithm on the input sequence
     pub fn process(sequence: &[u8], opts: LongdustOptions) -> Vec<(usize, usize)> {
         // Encode sequence
         let encoded_seq = encode_sequence(sequence);
@@ -203,7 +203,17 @@ impl Longdust {
         let mut en: i64 = -1;
         let mut last_q: i64 = -1;
 
-        for (i, &b) in encoded_seq.iter().chain(std::iter::once(&4)).enumerate() {
+        let len = encoded_seq.len();
+        // Main hot loop - process each position plus one sentinel
+        for i in 0..=len {
+            // Get base, using sentinel value 4 at the end
+            let b = if i < len {
+                // SAFETY: i < len, so this is in bounds
+                unsafe { *encoded_seq.get_unchecked(i) }
+            } else {
+                4
+            };
+
             // Update current k-mer and ambi flag
             let ambi = if b < 4 {
                 x = ((x << 2) | (b as u32)) & mask;
@@ -219,18 +229,31 @@ impl Longdust {
                 let p = self.q.pop_front().unwrap();
                 if (p & 1) == 0 {
                     let k = (p >> 1) as usize;
-                    if self.window_ht[k] > 0 {
-                        // subtract c[count] and decrement
-                        ht_sum -= self.c[self.window_ht[k] as usize];
-                        self.window_ht[k] -= 1;
+                    // SAFETY: k is extracted from a packed value (p >> 1) where
+                    // p was stored as (x << 1) | ambi_bit. x was masked by
+                    // (1 << (2*kmer)) - 1, so x < 2^(2*kmer). Therefore
+                    // k < 2^(2*kmer) = window_ht.len()
+                    let wht_k = unsafe { *self.window_ht.get_unchecked(k) };
+                    if wht_k > 0 {
+                        // SAFETY: wht_k is a count in the sliding window, so wht_k <= window_size
+                        // and c is sized to window_size + 1
+                        ht_sum -= unsafe { *self.c.get_unchecked(wht_k as usize) };
+                        // SAFETY: Same bounds as above
+                        unsafe {
+                            *self.window_ht.get_unchecked_mut(k) = wht_k - 1;
+                        }
                     }
                 }
 
                 if last_q == 0 {
                     if (p & 1) == 0 {
                         let k = (p >> 1) as usize;
-                        if self.ht[k] > 0 {
-                            self.ht[k] -= 1;
+                        // SAFETY: k < 2^(2*kmer) = ht.len()
+                        let ht_k = unsafe { *self.ht.get_unchecked(k) };
+                        if ht_k > 0 {
+                            unsafe {
+                                *self.ht.get_unchecked_mut(k) = ht_k - 1;
+                            }
                         }
                     }
                 } else if last_q > 0 {
@@ -246,14 +269,26 @@ impl Longdust {
             }
 
             let kmer_idx = x as usize;
-            self.window_ht[kmer_idx] += 1;
-            ht_sum += self.c[self.window_ht[kmer_idx] as usize];
+            // SAFETY: kmer_idx = x, where x is masked by (1 << (2*kmer)) - 1
+            // So kmer_idx < 2^(2*kmer) = window_ht.len()
+            let wht_kmer = unsafe { *self.window_ht.get_unchecked(kmer_idx) };
+            unsafe {
+                *self.window_ht.get_unchecked_mut(kmer_idx) = wht_kmer + 1;
+            }
+
+            // SAFETY: wht_kmer + 1 is the new count, which is at most window_size
+            // (since we pop elements when queue reaches window_size)
+            // and c is sized to window_size + 1
+            ht_sum += unsafe { *self.c.get_unchecked((wht_kmer + 1) as usize) };
 
             let mut j: i32 = -1;
 
-            if self.window_ht[kmer_idx] >= self.opts.min_start_cnt {
+            if wht_kmer + 1 >= self.opts.min_start_cnt {
                 let qlen = self.q.len();
-                let swin = ht_sum - self.f[qlen] - (qlen as f64) * self.opts.threshold;
+                // SAFETY: qlen <= window_size (due to pop_front above), and f
+                // is sized to window_size + 1
+                let f_qlen = unsafe { *self.f.get_unchecked(qlen) };
+                let swin = ht_sum - f_qlen - (qlen as f64) * self.opts.threshold;
 
                 // Attempt extend (only when end matches and some conditions)
                 if (i as i64) == en && (last_q == 0 || (i as i64) - st >= qlen as i64) && swin > 0.0
@@ -317,30 +352,48 @@ impl Longdust {
 
         // Iterate backwards over the queue
         for i in (0..q_size).rev() {
-            let x = self.q[i as usize];
+            // SAFETY: i is in range [0, q_size), and q.len() = q_size
+            let x = unsafe { *self.q.get(i as usize).unwrap_unchecked() };
+
             // Compute backward score s
             let score_val = if (x & 1) == 0 {
                 let k = (x >> 1) as usize;
-                self.ht[k] += 1;
-                self.c[self.ht[k] as usize]
+                // SAFETY: k < 2^(2*kmer) = ht.len()
+                let ht_k = unsafe { *self.ht.get_unchecked(k) };
+                let new_ht_k = ht_k + 1;
+                unsafe {
+                    *self.ht.get_unchecked_mut(k) = new_ht_k;
+                }
+                // SAFETY: new_ht_k is a count, bounded by queue length <= window_size
+                // c is sized to window_size + 1
+                unsafe { *self.c.get_unchecked(new_ht_k as usize) }
             } else {
                 0.0
             };
             s += score_val - self.opts.threshold;
-            let sl = s - self.f[l];
+
+            // SAFETY: l is bounded by loop iterations, starting at 1 and incrementing
+            // l <= q_size <= window_size, and f is sized to window_size + 1
+            let f_l = unsafe { *self.f.get_unchecked(l) };
+            let sl = s - f_l;
 
             // Compute forward feasibility score sw
             let sw_val = if (x & 1) == 0 {
                 let k = (x >> 1) as usize;
-                let idx = self.window_ht[k] + 1 - self.ht[k];
-                self.c[idx as usize]
+                // SAFETY: k < 2^(2*kmer) = window_ht.len() and ht.len()
+                let wht_k = unsafe { *self.window_ht.get_unchecked(k) };
+                let ht_k = unsafe { *self.ht.get_unchecked(k) };
+                let idx = wht_k + 1 - ht_k;
+                // SAFETY: idx = (wht_k + 1) - ht_k where wht_k <= window_size and ht_k <= wht_k + 1
+                // So idx <= window_size, and c is sized to window_size + 1
+                unsafe { *self.c.get_unchecked(idx as usize) }
             } else {
                 0.0
             };
             sw += sw_val - self.opts.threshold;
 
             // If forward can't reach, break
-            if sw - self.f[l] < 0.0 {
+            if sw - f_l < 0.0 {
                 break;
             }
 
@@ -377,8 +430,10 @@ impl Longdust {
         let mut max_end: i32 = -1;
         let n_for = self.for_pos.len();
         for idx in (0..n_for).rev() {
-            let pos = self.for_pos[idx].pos;
-            let max_score = self.for_pos[idx].max_score;
+            // SAFETY: idx < n_for = for_pos.len()
+            let for_pos = unsafe { self.for_pos.get_unchecked(idx) };
+            let pos = for_pos.pos;
+            let max_score = for_pos.max_score;
             if pos < max_end {
                 continue;
             }
@@ -401,18 +456,30 @@ impl Longdust {
         let mut max_sf: f64 = 0.0;
         let mut s: f64 = 0.0;
         let mut l: usize = 1;
-        for i in (i0 as usize)..self.q.len() {
-            let x = self.q[i];
+        let q_len = self.q.len();
+        for i in (i0 as usize)..q_len {
+            // SAFETY: i is in range [i0, q_len), verified by loop bounds
+            let x = unsafe { *self.q.get(i).unwrap_unchecked() };
             let score_val = if (x & 1) == 0 {
                 let k = (x >> 1) as usize;
-                self.ht_for[k] += 1;
-                self.c[self.ht_for[k] as usize]
+                // SAFETY: k < 2^(2*kmer) = ht_for.len()
+                let htf_k = unsafe { *self.ht_for.get_unchecked(k) };
+                let new_htf_k = htf_k + 1;
+                unsafe {
+                    *self.ht_for.get_unchecked_mut(k) = new_htf_k;
+                }
+                // SAFETY: new_htf_k <= window_size (bounded by queue length)
+                // c is sized to window_size + 1
+                unsafe { *self.c.get_unchecked(new_htf_k as usize) }
             } else {
                 0.0
             };
             s += score_val - self.opts.threshold;
 
-            let sl = s - self.f[l];
+            // SAFETY: l starts at 1, increments each iteration
+            // l <= (q_len - i0) <= window_size, f is sized to window_size + 1
+            let f_l = unsafe { *self.f.get_unchecked(l) };
+            let sl = s - f_l;
             if sl >= max_sf {
                 max_sf = sl;
                 max_i = i as i32;
@@ -428,11 +495,16 @@ impl Longdust {
     /// Quick backward-check heuristic: returns true if backward scan is worth trying
     fn if_backward(&self, max_step: i32) -> bool {
         let mut s = 0.0;
-        for i in (0..self.q.len()).rev().take(max_step as usize) {
-            let x = self.q[i];
+        let max_check = (max_step as usize).min(self.q.len());
+        for i in (0..self.q.len()).rev().take(max_check) {
+            // SAFETY: i is from the reverse iterator over 0..q.len(), so it's in bounds
+            let x = unsafe { *self.q.get(i).unwrap_unchecked() };
             let val = if (x & 1) == 0 {
                 let k = (x >> 1) as usize;
-                self.c[self.window_ht[k] as usize]
+                // SAFETY: k < 2^(2*kmer) = window_ht.len()
+                let wht_k = unsafe { *self.window_ht.get_unchecked(k) };
+                // SAFETY: wht_k <= window_size, c is sized to window_size + 1
+                unsafe { *self.c.get_unchecked(wht_k as usize) }
             } else {
                 0.0
             };
@@ -455,17 +527,24 @@ impl Longdust {
         }
         let k = (x >> 1) as usize;
         let l = self.q.len().saturating_sub(1);
-        let ht_k = *self.ht.get(k).unwrap_or(&0u16);
+        // SAFETY: k < 2^(2*kmer) = ht.len()
+        let ht_k = unsafe { *self.ht.get_unchecked(k) };
         let idx = (ht_k as usize).saturating_add(1);
         if idx >= self.c.len() || (l + 1) >= self.f.len() {
             return -1;
         }
-        let diff = self.c[idx] - (self.f[l + 1] - self.f[l]);
+        // SAFETY: We just checked idx < c.len() and l+1 < f.len()
+        let c_idx = unsafe { *self.c.get_unchecked(idx) };
+        let f_l = unsafe { *self.f.get_unchecked(l) };
+        let f_l1 = unsafe { *self.f.get_unchecked(l + 1) };
+        let diff = c_idx - (f_l1 - f_l);
+
         if diff < self.opts.threshold {
             return -1;
         }
-        if let Some(v) = self.ht.get_mut(k) {
-            *v += 1;
+        // SAFETY: k < ht.len() as established above
+        unsafe {
+            *self.ht.get_unchecked_mut(k) = ht_k + 1;
         }
         0
     }
@@ -527,7 +606,7 @@ impl Longdust {
         }
     }
 
-    // Math helpers for f() table computation
+    /// Math helpers for f() table computation
     fn f_large(lambda: f64) -> f64 {
         let x = 0.5 * (2.0 * PI * E * lambda).ln()
             - 1.0 / (12.0 * lambda) * (1.0 + 0.5 / lambda + 19.0 / (30.0 * lambda * lambda));

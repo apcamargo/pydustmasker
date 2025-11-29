@@ -37,11 +37,11 @@ struct PerfectInterval {
 /// Options for SymmetricDust
 #[derive(Debug, Clone, Copy)]
 pub struct SymmetricDustOptions {
-    /// The length of the window used by symmetric DUST algorithm.
-    /// `W` in the paper.
+    // The length of the window used by symmetric DUST algorithm.
+    // `W` in the paper.
     pub window_size: usize,
-    /// 10 times the score threshold used by symmetric DUST algorithm.
-    /// `T` in the paper.
+    // 10 times the score threshold used by symmetric DUST algorithm.
+    // `T` in the paper.
     pub score_threshold: usize,
 }
 
@@ -60,15 +60,15 @@ impl Default for SymmetricDustOptions {
 /// The main structure for the Symmetric DUST algorithm execution.
 #[derive(Debug)]
 pub struct SymmetricDust<'a> {
-    /// Parameters struct
+    // Parameters struct
     options: SymmetricDustOptions,
-    /// `q` in the paper - the sequence being processed
+    // `q` in the paper - the sequence being processed
     sequence: &'a [u8],
-    /// `P` in the paper - stores detected intervals that meet the criteria
+    // `P` in the paper - stores detected intervals that meet the criteria
     perfect_intervals: VecDeque<PerfectInterval>,
-    /// `res` in the paper - the final, merged results
+    // `res` in the paper - the final, merged results
     results: Vec<Range<usize>>,
-    /// `w` in the paper - the sliding window of triplets
+    // `w` in the paper - the sliding window of triplets
     window: VecDeque<usize>,
     // counts in the current window
     cv: [usize; 64],
@@ -76,12 +76,12 @@ pub struct SymmetricDust<'a> {
     // runnings counts
     rv: usize,
     rw: usize,
-    /// `L` in the paper - The biggest number of triplets whose count is <= 2*T/10
+    // `L` in the paper - The biggest number of triplets whose count is <= 2*T/10
     biggest_num_triplets: usize,
 }
 
 impl<'a> SymmetricDust<'a> {
-    /// Initializes and runs the Symmetric DUST algorithm on the sequence with the given options.
+    /// Initialize and run the SymmetricDust algorithm on the input sequence
     pub fn process(sequence: &'a [u8], options: SymmetricDustOptions) -> Vec<(usize, usize)> {
         let mut obj = SymmetricDust {
             options,
