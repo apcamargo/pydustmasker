@@ -60,7 +60,7 @@ impl Default for SymmetricDustOptions {
 /// The main structure for the Symmetric DUST algorithm execution.
 #[derive(Debug)]
 pub struct SymmetricDust<'a> {
-    /// Parameters stuct
+    /// Parameters struct
     options: SymmetricDustOptions,
     /// `q` in the paper - the sequence being processed
     sequence: &'a [u8],

@@ -79,15 +79,15 @@ impl Default for LongdustOptions {
 
 #[derive(Debug)]
 pub struct Longdust {
-    /// Parameters stuct
+    /// Parameters struct
     opts: LongdustOptions,
     f: Vec<f64>,
     c: Vec<f64>,
     q: VecDeque<u32>,
     // Counters used across passes (preallocated)
-    ht: Vec<u16>,        // counts used in backward pass (like ld->ht)
+    ht: Vec<u16>,        // counts used in backward pass
     ht_for: Vec<u16>,    // counts used in forward pass
-    window_ht: Vec<u16>, // counts of k-mers in the current sliding window (allocated once and reused)
+    window_ht: Vec<u16>, // counts of k-mers in the current sliding window
     max_test: i32,
     // Temp for forward candidate positions
     for_pos: Vec<ForwardPosition>,
@@ -96,7 +96,7 @@ pub struct Longdust {
 }
 
 impl Longdust {
-    /// Main entry point using the Options struct to resolve the "too many arguments" lint.
+    /// Main entry point using the Options struct
     pub fn process(sequence: &[u8], opts: LongdustOptions) -> Vec<(usize, usize)> {
         // Encode sequence
         let encoded_seq = encode_sequence(sequence);
@@ -127,7 +127,7 @@ impl Longdust {
             }
         }
 
-        // Construct the struct, preallocating tables once (Phase A)
+        // Construct the struct, preallocating tables once
         let mut obj = Self {
             opts,
             f,
@@ -182,7 +182,7 @@ impl Longdust {
         self.merge_intervals(fwd_intervals, rev_intervals);
     }
 
-    /// Process a single encoded strand (operates on a slice to avoid cloning tables)
+    /// Process a single encoded strand
     fn inner_process(&mut self, encoded_seq: &[u8]) {
         let mask = (1u32 << (2 * self.opts.kmer)) - 1;
 
@@ -203,9 +203,6 @@ impl Longdust {
         let mut en: i64 = -1;
         let mut last_q: i64 = -1;
 
-        // Fix for "loop variable i used to index encoded_seq":
-        // We chain the sequence with a single sentinel value (4) to handle the final iteration.
-        // This removes the check `if i < len` inside the loop.
         for (i, &b) in encoded_seq.iter().chain(std::iter::once(&4)).enumerate() {
             // Update current k-mer and ambi flag
             let ambi = if b < 4 {
@@ -318,10 +315,10 @@ impl Longdust {
         let q_size = self.q.len() as i32;
         let mut l: usize = 1;
 
-        // iterate backwards over the queue
+        // Iterate backwards over the queue
         for i in (0..q_size).rev() {
             let x = self.q[i as usize];
-            // compute backward score s
+            // Compute backward score s
             let score_val = if (x & 1) == 0 {
                 let k = (x >> 1) as usize;
                 self.ht[k] += 1;
@@ -331,7 +328,8 @@ impl Longdust {
             };
             s += score_val - self.opts.threshold;
             let sl = s - self.f[l];
-            // compute forward feasibility score sw using the preallocated window_ht to avoid borrowing self immutably while calling other &mut methods
+
+            // Compute forward feasibility score sw
             let sw_val = if (x & 1) == 0 {
                 let k = (x >> 1) as usize;
                 let idx = self.window_ht[k] + 1 - self.ht[k];
@@ -340,11 +338,13 @@ impl Longdust {
                 0.0
             };
             sw += sw_val - self.opts.threshold;
-            // if forward can't reach, break
+
+            // If forward can't reach, break
             if sw - self.f[l] < 0.0 {
                 break;
             }
-            // record candidate forward positions where forward pass may be needed
+
+            // Record candidate forward positions where forward pass may be needed
             if sl < last_sl && last_sl > 0.0 && (last_sl - max_sb).abs() < 1e-9 {
                 self.for_pos.push(ForwardPosition {
                     pos: i + 1,
@@ -360,11 +360,12 @@ impl Longdust {
             last_sl = sl;
             l += 1;
         }
+
         if max_i < 0 {
             return -1;
         }
 
-        // ensure max_i is present in for_pos
+        // Ensure max_i is present in for_pos
         if self.for_pos.is_empty() || max_i < self.for_pos.last().unwrap().pos {
             self.for_pos.push(ForwardPosition {
                 pos: max_i,
@@ -372,7 +373,7 @@ impl Longdust {
             });
         }
 
-        // forward examine candidate positions
+        // Forward examine candidate positions
         let mut max_end: i32 = -1;
         let n_for = self.for_pos.len();
         for idx in (0..n_for).rev() {
@@ -568,7 +569,6 @@ impl Longdust {
     ) -> Vec<f64> {
         let n_kmer = 1usize << (2 * k);
         let mut f = vec![0.0f64; max_l + 1];
-        // Fix: Use enumerate skip(1) for l indexing
         for (l, val) in f.iter_mut().enumerate().skip(1).take(max_l) {
             let mut accum = 0.0f64;
             for (dr_i, n_dr_i) in dr.iter().zip(n_dr.iter()).take(nn_dr) {
