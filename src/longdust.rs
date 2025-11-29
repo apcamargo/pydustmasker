@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::f64::consts::{E, PI};
 use std::ops::Range;
 
-const MAX_N: i32 = 10000;
+const MAX_N: usize = 10000;
 
 /// Lookup to encode ASCII DNA letters into 0..4
 /// A -> 0, C -> 1, G -> 2, T -> 3, others -> 4
@@ -45,7 +45,7 @@ fn reverse_complement_encoded_sequence(encoded_seq: &[u8]) -> Vec<u8> {
 /// Candidate forward positions (when backward scan suggests forward check)
 #[derive(Clone, Debug)]
 struct ForwardPosition {
-    pos: usize,
+    pos: i32,
     max_score: f64,
 }
 
@@ -56,40 +56,39 @@ pub struct LongdustOptions {
     pub window_size: usize,
     pub threshold: f64,
     pub xdrop_len: usize,
-    pub min_start_cnt: usize,
+    pub min_start_cnt: u16,
     pub approx: bool,
     pub gc: f64,
+    pub forward_only: bool,
 }
 
 impl Default for LongdustOptions {
     fn default() -> Self {
         Self {
-            kmer: 3,
-            window_size: 64,
-            threshold: 2.0,
-            xdrop_len: 0,
-            min_start_cnt: 1,
-            approx: true,
+            kmer: 7,
+            window_size: 5000,
+            threshold: 0.6,
             gc: 0.5,
+            xdrop_len: 50,
+            min_start_cnt: 3,
+            forward_only: false,
+            approx: false,
         }
     }
 }
 
 #[derive(Debug)]
 pub struct Longdust {
-    // Input & parameters
-    encoded_seq: Vec<u8>,
+    /// Parameters stuct
     opts: LongdustOptions,
-    // Precomputed tables
     f: Vec<f64>,
     c: Vec<f64>,
-    // Sliding queue: store u32 packed value ((kmer << 1) | ambi)
     q: VecDeque<u32>,
     // Counters used across passes (preallocated)
     ht: Vec<u16>,        // counts used in backward pass (like ld->ht)
     ht_for: Vec<u16>,    // counts used in forward pass
     window_ht: Vec<u16>, // counts of k-mers in the current sliding window (allocated once and reused)
-    max_test: usize,
+    max_test: i32,
     // Temp for forward candidate positions
     for_pos: Vec<ForwardPosition>,
     // Output intervals
@@ -110,29 +109,27 @@ impl Longdust {
             Self::calculate_f(opts.kmer, opts.window_size + 1)
         };
 
-        // Precompute log values (c)
+        // Precompute log values
         let mut c = vec![0.0f64; opts.window_size + 1];
-        // Fix for "loop variable i is used to index c": use iter_mut().enumerate()
         for (i, val) in c.iter_mut().enumerate().skip(2) {
             *val = (i as f64).ln();
         }
 
         // Calculate max_test
-        let mut max_test = 0usize;
+        let mut max_test = 0i32;
         let mut s = 0.0f64;
         for (i, &c_val) in c.iter().enumerate().skip(1).take(opts.window_size) {
             s += c_val - opts.threshold;
             let sl = s - f[i];
             if sl > 0.0 {
-                max_test = ((i as f64) * (i as f64).ln() / opts.threshold) as usize;
+                max_test = ((i as f64) * (i as f64).ln() / opts.threshold) as i32;
                 break;
             }
         }
 
         // Construct the struct, preallocating tables once (Phase A)
         let mut obj = Self {
-            encoded_seq,
-            opts, // Store options directly
+            opts,
             f,
             c,
             q: VecDeque::new(),
@@ -144,8 +141,12 @@ impl Longdust {
             results: Vec::new(),
         };
 
-        // Process forward and reverse using same tables (avoid cloning f/c)
-        obj.inner_process_both_strands();
+        // Process the sequence (either forward-only or both strands)
+        if obj.opts.forward_only {
+            obj.inner_process(&encoded_seq);
+        } else {
+            obj.inner_process_both_strands(&encoded_seq);
+        }
 
         // Convert results into Vec<(usize, usize)>
         let mut out = Vec::with_capacity(obj.results.len());
@@ -162,26 +163,21 @@ impl Longdust {
     }
 
     /// Process forward and reverse strands, reusing precomputed tables
-    fn inner_process_both_strands(&mut self) {
-        // Move encoded sequence out to avoid overlapping borrows when calling inner_process
-        let seq = std::mem::take(&mut self.encoded_seq);
+    fn inner_process_both_strands(&mut self, encoded_seq: &[u8]) {
         // Forward
-        self.inner_process(&seq);
+        self.inner_process(encoded_seq);
         let fwd_intervals = self.results.clone();
         // Reverse
-        let len = seq.len();
-        let rev_seq = reverse_complement_encoded_sequence(&seq);
+        let encoded_seq_rc = reverse_complement_encoded_sequence(encoded_seq);
         self.results.clear();
-        self.inner_process(&rev_seq);
+        self.inner_process(&encoded_seq_rc);
         // Transform reverse intervals back into forward coordinates
         let rev_intervals: Vec<Range<usize>> = self
             .results
             .iter()
             .rev()
-            .map(|intv| (len - intv.end)..(len - intv.start))
+            .map(|intv| (encoded_seq.len() - intv.end)..(encoded_seq.len() - intv.start))
             .collect();
-        // Restore original encoded sequence
-        self.encoded_seq = seq;
         // Merge forward and reverse intervals
         self.merge_intervals(fwd_intervals, rev_intervals);
     }
@@ -193,7 +189,7 @@ impl Longdust {
         self.results.clear();
         self.q.clear();
 
-        // Ensure window_ht is sized appropriately and zero it (reuse allocation across calls)
+        // Ensure window_ht is sized appropriately and zero it
         let expected = ((mask + 1) as usize).max(1);
         if self.window_ht.len() != expected {
             self.window_ht.resize(expected, 0);
@@ -319,12 +315,12 @@ impl Longdust {
         let mut s: f64 = 0.0;
         let mut sw: f64 = 0.0;
 
-        let q_size = self.q.len();
+        let q_size = self.q.len() as i32;
         let mut l: usize = 1;
 
         // iterate backwards over the queue
         for i in (0..q_size).rev() {
-            let x = self.q[i];
+            let x = self.q[i as usize];
             // compute backward score s
             let score_val = if (x & 1) == 0 {
                 let k = (x >> 1) as usize;
@@ -357,7 +353,7 @@ impl Longdust {
             }
             if sl >= max_sb {
                 max_sb = sl;
-                max_i = i as i32;
+                max_i = i;
             } else if max_i >= 0 && max_sb - sl > xdrop {
                 break;
             }
@@ -369,9 +365,9 @@ impl Longdust {
         }
 
         // ensure max_i is present in for_pos
-        if self.for_pos.is_empty() || max_i < self.for_pos.last().unwrap().pos as i32 {
+        if self.for_pos.is_empty() || max_i < self.for_pos.last().unwrap().pos {
             self.for_pos.push(ForwardPosition {
-                pos: max_i as usize,
+                pos: max_i,
                 max_score: max_sb,
             });
         }
@@ -382,12 +378,12 @@ impl Longdust {
         for idx in (0..n_for).rev() {
             let pos = self.for_pos[idx].pos;
             let max_score = self.for_pos[idx].max_score;
-            if (pos as i32) < max_end {
+            if pos < max_end {
                 continue;
             }
             let k = self.dust_forward(pos, max_score);
-            if k == (q_size - 1) as i32 {
-                return pos as i32;
+            if k == (q_size - 1) {
+                return pos;
             }
             if self.opts.approx {
                 break;
@@ -398,13 +394,13 @@ impl Longdust {
     }
 
     /// Forward scan starting at i0; returns index achieving max score or -1
-    fn dust_forward(&mut self, i0: usize, max_back: f64) -> i32 {
+    fn dust_forward(&mut self, i0: i32, max_back: f64) -> i32 {
         self.ht_for.fill(0);
         let mut max_i: i32 = -1;
         let mut max_sf: f64 = 0.0;
         let mut s: f64 = 0.0;
         let mut l: usize = 1;
-        for i in i0..self.q.len() {
+        for i in (i0 as usize)..self.q.len() {
             let x = self.q[i];
             let score_val = if (x & 1) == 0 {
                 let k = (x >> 1) as usize;
@@ -425,14 +421,13 @@ impl Longdust {
             }
             l += 1;
         }
-
         max_i
     }
 
     /// Quick backward-check heuristic: returns true if backward scan is worth trying
-    fn if_backward(&self, max_step: usize) -> bool {
+    fn if_backward(&self, max_step: i32) -> bool {
         let mut s = 0.0;
-        for i in (0..self.q.len()).rev().take(max_step) {
+        for i in (0..self.q.len()).rev().take(max_step as usize) {
             let x = self.q[i];
             let val = if (x & 1) == 0 {
                 let k = (x >> 1) as usize;
@@ -531,7 +526,7 @@ impl Longdust {
         }
     }
 
-    // Math helpers for f() table computation (same as reference)
+    // Math helpers for f() table computation
     fn f_large(lambda: f64) -> f64 {
         let x = 0.5 * (2.0 * PI * E * lambda).ln()
             - 1.0 / (12.0 * lambda) * (1.0 + 0.5 / lambda + 19.0 / (30.0 * lambda * lambda));
