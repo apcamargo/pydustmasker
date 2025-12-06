@@ -149,30 +149,22 @@ impl Longdust {
         }
 
         // Convert results into Vec<(usize, usize)>
-        let mut out = Vec::with_capacity(obj.results.len());
-        for r in obj.results {
-            // clamp end to sequence length as in original
-            let end = if r.end > sequence.len() {
-                sequence.len()
-            } else {
-                r.end
-            };
-            out.push((r.start, end));
-        }
-        out
+        obj.results
+            .into_iter()
+            .map(|r| (r.start, r.end.min(sequence.len())))
+            .collect()
     }
 
     /// Process forward and reverse strands, reusing precomputed tables
     fn inner_process_both_strands(&mut self, encoded_seq: &[u8]) {
         // Forward
         self.inner_process(encoded_seq);
-        let fwd_intervals = self.results.clone();
+        let fwd_intervals = std::mem::take(&mut self.results);
         // Reverse
         let encoded_seq_rc = reverse_complement_encoded_sequence(encoded_seq);
-        self.results.clear();
         self.inner_process(&encoded_seq_rc);
         // Transform reverse intervals back into forward coordinates
-        let rev_intervals: Vec<Range<usize>> = self
+        let rev_intervals = self
             .results
             .iter()
             .rev()
@@ -383,10 +375,9 @@ impl Longdust {
                 // SAFETY: k < 2^(2*kmer) = window_ht.len() and ht.len()
                 let wht_k = unsafe { *self.window_ht.get_unchecked(k) };
                 let ht_k = unsafe { *self.ht.get_unchecked(k) };
-                let idx = wht_k + 1 - ht_k;
                 // SAFETY: idx = (wht_k + 1) - ht_k where wht_k <= window_size and ht_k <= wht_k + 1
                 // So idx <= window_size, and c is sized to window_size + 1
-                unsafe { *self.c.get_unchecked(idx as usize) }
+                unsafe { *self.c.get_unchecked((wht_k + 1 - ht_k) as usize) }
             } else {
                 0.0
             };
@@ -428,12 +419,12 @@ impl Longdust {
 
         // Forward examine candidate positions
         let mut max_end: i32 = -1;
-        let n_for = self.for_pos.len();
-        for idx in (0..n_for).rev() {
-            // SAFETY: idx < n_for = for_pos.len()
-            let for_pos = unsafe { self.for_pos.get_unchecked(idx) };
-            let pos = for_pos.pos;
-            let max_score = for_pos.max_score;
+        for idx in (0..self.for_pos.len()).rev() {
+            // SAFETY: idx < for_pos.len()
+            let (pos, max_score) = unsafe {
+                let for_pos = self.for_pos.get_unchecked(idx);
+                (for_pos.pos, for_pos.max_score)
+            };
             if pos < max_end {
                 continue;
             }
@@ -478,8 +469,7 @@ impl Longdust {
 
             // SAFETY: l starts at 1, increments each iteration
             // l <= (q_len - i0) <= window_size, f is sized to window_size + 1
-            let f_l = unsafe { *self.f.get_unchecked(l) };
-            let sl = s - f_l;
+            let sl = s - unsafe { *self.f.get_unchecked(l) };
             if sl >= max_sf {
                 max_sf = sl;
                 max_i = i as i32;
@@ -495,8 +485,10 @@ impl Longdust {
     /// Quick backward-check heuristic: returns true if backward scan is worth trying
     fn if_backward(&self, max_step: i32) -> bool {
         let mut s = 0.0;
-        let max_check = (max_step as usize).min(self.q.len());
-        for i in (0..self.q.len()).rev().take(max_check) {
+        for i in (0..self.q.len())
+            .rev()
+            .take((max_step as usize).min(self.q.len()))
+        {
             // SAFETY: i is from the reverse iterator over 0..q.len(), so it's in bounds
             let x = unsafe { *self.q.get(i).unwrap_unchecked() };
             let val = if (x & 1) == 0 {
@@ -534,12 +526,10 @@ impl Longdust {
             return -1;
         }
         // SAFETY: We just checked idx < c.len() and l+1 < f.len()
-        let c_idx = unsafe { *self.c.get_unchecked(idx) };
-        let f_l = unsafe { *self.f.get_unchecked(l) };
-        let f_l1 = unsafe { *self.f.get_unchecked(l + 1) };
-        let diff = c_idx - (f_l1 - f_l);
-
-        if diff < self.opts.threshold {
+        if unsafe { *self.c.get_unchecked(idx) }
+            - (unsafe { *self.f.get_unchecked(l + 1) } - unsafe { *self.f.get_unchecked(l) })
+            < self.opts.threshold
+        {
             return -1;
         }
         // SAFETY: k < ht.len() as established above
@@ -552,10 +542,10 @@ impl Longdust {
     /// Merge two sorted lists of intervals (forward and reverse) into results
     fn merge_intervals(&mut self, fwd: Vec<Range<usize>>, rev: Vec<Range<usize>>) {
         self.results.clear();
-        let mut i = 0usize;
-        let mut j = 0usize;
-        let mut st = 0usize;
-        let mut en = 0usize;
+        let mut i = 0;
+        let mut j = 0;
+        let mut st = 0;
+        let mut en = 0;
 
         while i < fwd.len() || j < rev.len() {
             let intv: &Range<usize> = if j >= rev.len() {
