@@ -85,8 +85,7 @@ pub struct Longdust {
     c: Vec<f64>,
     q: VecDeque<u32>,
     // Counters used across passes (preallocated)
-    ht: Vec<u16>,        // counts used in backward pass
-    ht_for: Vec<u16>,    // counts used in forward pass
+    ht: Vec<u16>,        // counts used in backward and forward passes
     window_ht: Vec<u16>, // counts of k-mers in the current sliding window
     max_test: i32,
     // Temp for forward candidate positions
@@ -134,7 +133,6 @@ impl Longdust {
             c,
             q: VecDeque::new(),
             ht: vec![0u16; table_size],
-            ht_for: vec![0u16; table_size],
             window_ht: vec![0u16; table_size],
             max_test,
             for_pos: Vec::new(),
@@ -442,7 +440,7 @@ impl Longdust {
 
     /// Forward scan starting at i0; returns index achieving max score or -1
     fn dust_forward(&mut self, i0: i32, max_back: f64) -> i32 {
-        self.ht_for.fill(0);
+        self.ht.fill(0);
         let mut max_i: i32 = -1;
         let mut max_sf: f64 = 0.0;
         let mut s: f64 = 0.0;
@@ -453,11 +451,11 @@ impl Longdust {
             let x = unsafe { *self.q.get(i).unwrap_unchecked() };
             let score_val = if (x & 1) == 0 {
                 let k = (x >> 1) as usize;
-                // SAFETY: k < 2^(2*kmer) = ht_for.len()
-                let htf_k = unsafe { *self.ht_for.get_unchecked(k) };
+                // SAFETY: k < 2^(2*kmer) = ht.len()
+                let htf_k = unsafe { *self.ht.get_unchecked(k) };
                 let new_htf_k = htf_k + 1;
                 unsafe {
-                    *self.ht_for.get_unchecked_mut(k) = new_htf_k;
+                    *self.ht.get_unchecked_mut(k) = new_htf_k;
                 }
                 // SAFETY: new_htf_k <= window_size (bounded by queue length)
                 // c is sized to window_size + 1
