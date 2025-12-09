@@ -59,11 +59,9 @@ impl Default for SymmetricDustOptions {
 
 /// The main structure for the Symmetric DUST algorithm execution.
 #[derive(Debug)]
-pub struct SymmetricDust<'a> {
+pub struct SymmetricDust {
     // Parameters struct
     options: SymmetricDustOptions,
-    // `q` in the paper - the sequence being processed
-    sequence: &'a [u8],
     // `P` in the paper - stores detected intervals that meet the criteria
     perfect_intervals: VecDeque<PerfectInterval>,
     // `res` in the paper - the final, merged results
@@ -80,12 +78,11 @@ pub struct SymmetricDust<'a> {
     biggest_num_triplets: usize,
 }
 
-impl<'a> SymmetricDust<'a> {
+impl SymmetricDust {
     /// Initialize and run the SymmetricDust algorithm on the input sequence
-    pub fn process(sequence: &'a [u8], options: SymmetricDustOptions) -> Vec<(usize, usize)> {
+    pub fn process(sequence: &[u8], options: SymmetricDustOptions) -> Vec<(usize, usize)> {
         let mut obj = SymmetricDust {
             options,
-            sequence,
             perfect_intervals: VecDeque::new(),
             results: Vec::new(),
             window: VecDeque::new(),
@@ -96,7 +93,8 @@ impl<'a> SymmetricDust<'a> {
             biggest_num_triplets: 0,
         };
 
-        obj.inner_process();
+        let encoded_seq = encode_sequence(sequence);
+        obj.inner_process(&encoded_seq);
         let mut res = Vec::with_capacity(obj.results.len());
 
         // The algorithm can sometimes give end ranges outside of the sequence
@@ -108,8 +106,7 @@ impl<'a> SymmetricDust<'a> {
         res
     }
 
-    fn inner_process(&mut self) {
-        let encoded_seq = encode_sequence(self.sequence);
+    fn inner_process(&mut self, encoded_seq: &[u8]) {
         let mut triplet: u8 = 0;
         let mut l: usize = 0;
 
