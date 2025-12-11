@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.8,<2.0"]
+requires = ["maturin>=1.10,<2.0"]
 build-backend = "maturin"
 
 [project]
@@ -8,6 +8,7 @@ description = "Python bindings to DustMasker, a utility to identify and mask low
 authors = [{ name = "Antonio Camargo", email = "antoniop.camargo@gmail.com" }]
 dynamic = ["version"]
 license = "MIT"
+requires-python = ">=3.8"
 readme = "README.md"
 
 [project.urls]

@@ -1,64 +1,44 @@
+use crate::common::{compute_gc_content, encode_sequence, reverse_complement_encoded_sequence};
 use std::collections::VecDeque;
 use std::f64::consts::{E, PI};
 use std::ops::Range;
 
-const MAX_N: usize = 10000;
-
-/// Lookup to encode ASCII DNA letters into 0..4
-/// A -> 0, C -> 1, G -> 2, T -> 3, others -> 4
-const ENCODING_LOOKUP: [u8; 256] = {
-    let mut lookup = [4; 256];
-    lookup[b'A' as usize] = 0;
-    lookup[b'C' as usize] = 1;
-    lookup[b'G' as usize] = 2;
-    lookup[b'T' as usize] = 3;
-    lookup[b'a' as usize] = 0;
-    lookup[b'c' as usize] = 1;
-    lookup[b'g' as usize] = 2;
-    lookup[b't' as usize] = 3;
-    lookup
-};
-
-pub fn encode_sequence(sequence: &[u8]) -> Vec<u8> {
-    sequence
-        .iter()
-        .map(|&b| ENCODING_LOOKUP[b as usize])
-        .collect()
-}
-
-/// Reverse complement for encoded sequence:
-/// 0(A) <-> 3(T), 1(C) <-> 2(G), 4(N) -> 4(N)
-fn reverse_complement_encoded_sequence(encoded_seq: &[u8]) -> Vec<u8> {
-    encoded_seq
-        .iter()
-        .rev()
-        .map(|&b| match b {
-            0 => 3,
-            1 => 2,
-            2 => 1,
-            3 => 0,
-            x => x,
-        })
-        .collect()
-}
-
-/// Candidate forward positions (when backward scan suggests forward check)
+// Candidate forward positions (when backward scan suggests forward check)
 #[derive(Clone, Debug)]
 struct ForwardPosition {
     pos: i32,
     max_score: f64,
 }
 
-/// Options for Longdust
+// Handling the GC parameter
+#[derive(Debug, Clone, Copy)]
+pub enum GcOption {
+    // Use uniform distribution (no GC bias correction)
+    Uniform,
+    // Use fixed GC value for bias correction
+    Fixed(f64),
+    // Compute GC from the input sequence
+    Auto,
+}
+
+// Options for Longdust
 #[derive(Debug, Clone, Copy)]
 pub struct LongdustOptions {
+    // The k-mer size used by the Longdust algorithm
     pub kmer: usize,
+    // The size of the sliding window
     pub window_size: usize,
-    pub threshold: f64,
-    pub xdrop_len: usize,
+    // Score threshold for identifying low-complexity regions
+    pub score_threshold: f64,
+    // X-drop extension length: None=disabled (use full window), Some(n)=limit to n
+    pub xdrop: Option<usize>,
+    // Minimum k-mer count to trigger backward scan
     pub min_start_cnt: u16,
+    // Use approximate mode (faster but less accurate)
     pub approx: bool,
-    pub gc: f64,
+    // GC content handling mode
+    pub gc: GcOption,
+    // Only scan forward strand (skip reverse complement)
     pub forward_only: bool,
 }
 
@@ -67,9 +47,9 @@ impl Default for LongdustOptions {
         Self {
             kmer: 7,
             window_size: 5000,
-            threshold: 0.6,
-            gc: 0.5,
-            xdrop_len: 50,
+            score_threshold: 0.6,
+            gc: GcOption::Uniform,
+            xdrop: Some(50),
             min_start_cnt: 3,
             forward_only: false,
             approx: false,
@@ -81,12 +61,23 @@ impl Default for LongdustOptions {
 pub struct Longdust {
     // Parameters struct
     options: LongdustOptions,
+    // f[L]: precomputed expected score for random sequence of length L,
+    // subtracted from raw score to normalize for statistical significance
     f: Vec<f64>,
+    // c[i] = ln(i): precomputed log values for efficient ln(count!) computation
     c: Vec<f64>,
-    q: VecDeque<u32>,
-    // Counters used across passes (preallocated)
-    ht: Vec<u16>,        // counts used in backward and forward passes
-    window_ht: Vec<u16>, // counts of k-mers in the current sliding window
+    // Sliding window queue of encoded k-mers (VecDeque for O(1) push_back/pop_front)
+    // Each element: (kmer_value << 1) | ambiguous_flag
+    window: VecDeque<u32>,
+    // K-mer count hash tables (size = 4^kmer, preallocated for reuse)
+    // ht: temporary count table used during backward/forward scans to track
+    // k-mer occurrences within the current scan window
+    ht: Vec<u16>,
+    // window_ht: count table tracking k-mer occurrences in the sliding window,
+    // maintained incrementally as the window advances
+    window_ht: Vec<u16>,
+    // max_test: maximum number of steps to check in `if_backward()` heuristic,
+    // limiting how far back we look before deciding to trigger a full backward scan
     max_test: i32,
     // Temp for forward candidate positions
     for_pos: Vec<ForwardPosition>,
@@ -95,17 +86,23 @@ pub struct Longdust {
 }
 
 impl Longdust {
-    /// Initialize and run the Longdust algorithm on the input sequence
+    // Initialize and run the Longdust algorithm on the input sequence.
     pub fn process(sequence: &[u8], options: LongdustOptions) -> Vec<(usize, usize)> {
         // Encode sequence
         let encoded_seq = encode_sequence(sequence);
         let table_size = 1usize << (2 * options.kmer);
 
-        // Calculate f table (probability correction values)
-        let f = if options.gc > 0.0 && options.gc < 1.0 {
-            Self::calculate_f_gc(options.kmer, options.window_size + 1, options.gc)
-        } else {
-            Self::calculate_f(options.kmer, options.window_size + 1)
+        // Resolve GC mode and calculate the f table
+        let f = match options.gc {
+            GcOption::Uniform => Self::calculate_f(options.kmer, options.window_size + 1),
+            GcOption::Fixed(gc_val) => {
+                Self::calculate_f_gc(options.kmer, options.window_size + 1, gc_val)
+            }
+            GcOption::Auto => {
+                // Compute GC from encoded sequence
+                let gc_val = compute_gc_content(&encoded_seq);
+                Self::calculate_f_gc(options.kmer, options.window_size + 1, gc_val)
+            }
         };
 
         // Precompute log values
@@ -118,10 +115,10 @@ impl Longdust {
         let mut max_test = 0i32;
         let mut s = 0.0f64;
         for (i, &c_val) in c.iter().enumerate().skip(1).take(options.window_size) {
-            s += c_val - options.threshold;
+            s += c_val - options.score_threshold;
             let sl = s - f[i];
             if sl > 0.0 {
-                max_test = ((i as f64) * (i as f64).ln() / options.threshold) as i32;
+                max_test = ((i as f64) * (i as f64).ln() / options.score_threshold) as i32;
                 break;
             }
         }
@@ -131,7 +128,7 @@ impl Longdust {
             options,
             f,
             c,
-            q: VecDeque::new(),
+            window: VecDeque::new(),
             ht: vec![0u16; table_size],
             window_ht: vec![0u16; table_size],
             max_test,
@@ -153,7 +150,7 @@ impl Longdust {
             .collect()
     }
 
-    /// Process forward and reverse strands, reusing precomputed tables
+    // Process forward and reverse strands, reusing precomputed tables
     fn inner_process_both_strands(&mut self, encoded_seq: &[u8]) {
         // Forward
         self.inner_process(encoded_seq);
@@ -172,12 +169,12 @@ impl Longdust {
         self.merge_intervals(fwd_intervals, rev_intervals);
     }
 
-    /// Process a single encoded strand
+    // Process a single encoded strand
     fn inner_process(&mut self, encoded_seq: &[u8]) {
         let mask = (1u32 << (2 * self.options.kmer)) - 1;
 
         self.results.clear();
-        self.q.clear();
+        self.window.clear();
 
         // Ensure window_ht is sized appropriately and zero it
         let expected = ((mask + 1) as usize).max(1);
@@ -186,11 +183,10 @@ impl Longdust {
         }
         self.window_ht.fill(0);
         let mut ht_sum = 0.0f64;
-
-        let mut x: u32 = 0;
+        let mut kmer_val: u32 = 0;
         let mut l: usize = 0;
-        let mut st: i64 = -1;
-        let mut en: i64 = -1;
+        let mut start: i64 = -1;
+        let mut end: i64 = -1;
         let mut last_q: i64 = -1;
 
         let len = encoded_seq.len();
@@ -206,7 +202,7 @@ impl Longdust {
 
             // Update current k-mer and ambi flag
             let ambi = if b < 4 {
-                x = ((x << 2) | (b as u32)) & mask;
+                kmer_val = ((kmer_val << 2) | (b as u32)) & mask;
                 l += 1;
                 l < self.options.kmer
             } else {
@@ -215,8 +211,8 @@ impl Longdust {
             };
 
             // Pop front if window is full
-            if self.q.len() >= self.options.window_size {
-                let p = self.q.pop_front().unwrap();
+            if self.window.len() >= self.options.window_size {
+                let p = self.window.pop_front().unwrap();
                 if (p & 1) == 0 {
                     let k = (p >> 1) as usize;
                     // SAFETY: k is extracted from a packed value (p >> 1) where
@@ -251,15 +247,15 @@ impl Longdust {
                 }
             }
 
-            let packed = (x << 1) | (if ambi { 1 } else { 0 });
-            self.q.push_back(packed);
+            let packed = (kmer_val << 1) | (if ambi { 1 } else { 0 });
+            self.window.push_back(packed);
 
             if ambi {
                 continue;
             }
 
-            let kmer_idx = x as usize;
-            // SAFETY: kmer_idx = x, where x is masked by (1 << (2*kmer)) - 1
+            let kmer_idx = kmer_val as usize;
+            // SAFETY: kmer_idx = kmer_val, where kmer_val is masked by (1 << (2*kmer)) - 1
             // So kmer_idx < 2^(2*kmer) = window_ht.len()
             let wht_kmer = unsafe { *self.window_ht.get_unchecked(kmer_idx) };
             unsafe {
@@ -274,14 +270,16 @@ impl Longdust {
             let mut j: i32 = -1;
 
             if wht_kmer + 1 >= self.options.min_start_cnt {
-                let qlen = self.q.len();
+                let qlen = self.window.len();
                 // SAFETY: qlen <= window_size (due to pop_front above), and f
                 // is sized to window_size + 1
                 let f_qlen = unsafe { *self.f.get_unchecked(qlen) };
-                let swin = ht_sum - f_qlen - (qlen as f64) * self.options.threshold;
+                let swin = ht_sum - f_qlen - (qlen as f64) * self.options.score_threshold;
 
                 // Attempt extend (only when end matches and some conditions)
-                if (i as i64) == en && (last_q == 0 || (i as i64) - st >= qlen as i64) && swin > 0.0
+                if (i as i64) == end
+                    && (last_q == 0 || (i as i64) - start >= qlen as i64)
+                    && swin > 0.0
                 {
                     j = self.extend();
                 }
@@ -294,38 +292,38 @@ impl Longdust {
 
             if j >= 0 {
                 // Found LCR; compute start of LCR range
-                let st2 =
-                    (i as i64) - (self.q.len() as i64 - 1 - j as i64) - (self.options.kmer as i64 - 1);
+                let st2 = (i as i64)
+                    - (self.window.len() as i64 - 1 - j as i64)
+                    - (self.options.kmer as i64 - 1);
 
-                if st2 < en {
+                if st2 < end {
                     // overlap with active interval
-                    if st < 0 || st2 < st {
-                        st = st2;
+                    if start < 0 || st2 < start {
+                        start = st2;
                     }
                 } else {
                     // save previous interval and start a new one
-                    if st >= 0 {
-                        self.save_interval(st as usize, en as usize);
+                    if start >= 0 {
+                        self.save_interval(start as usize, end as usize);
                     }
-                    st = st2;
+                    start = st2;
                 }
-                en = (i + 1) as i64;
+                end = (i + 1) as i64;
                 last_q = j as i64;
             }
         }
 
-        if st >= 0 {
-            self.save_interval(st as usize, en as usize);
+        if start >= 0 {
+            self.save_interval(start as usize, end as usize);
         }
     }
 
-    /// Backward scan to find candidate start positions; returns queue index of start or -1 if none
+    // Backward scan to find candidate start positions; returns queue index of start or -1 if none
     fn dust_backward(&mut self, _win_sum: f64) -> i32 {
-        let xdrop = self.options.threshold
-            * if self.options.xdrop_len > 0 {
-                self.options.xdrop_len as f64
-            } else {
-                self.options.window_size as f64
+        let xdrop = self.options.score_threshold
+            * match self.options.xdrop {
+                Some(len) => len as f64,
+                None => self.options.window_size as f64,
             };
 
         self.ht.fill(0);
@@ -337,17 +335,17 @@ impl Longdust {
         let mut s: f64 = 0.0;
         let mut sw: f64 = 0.0;
 
-        let q_size = self.q.len() as i32;
+        let q_size = self.window.len() as i32;
         let mut l: usize = 1;
 
         // Iterate backwards over the queue
         for i in (0..q_size).rev() {
             // SAFETY: i is in range [0, q_size), and q.len() = q_size
-            let x = unsafe { *self.q.get(i as usize).unwrap_unchecked() };
+            let kmer_val = unsafe { *self.window.get(i as usize).unwrap_unchecked() };
 
             // Compute backward score s
-            let score_val = if (x & 1) == 0 {
-                let k = (x >> 1) as usize;
+            let score_val = if (kmer_val & 1) == 0 {
+                let k = (kmer_val >> 1) as usize;
                 // SAFETY: k < 2^(2*kmer) = ht.len()
                 let ht_k = unsafe { *self.ht.get_unchecked(k) };
                 let new_ht_k = ht_k + 1;
@@ -360,7 +358,7 @@ impl Longdust {
             } else {
                 0.0
             };
-            s += score_val - self.options.threshold;
+            s += score_val - self.options.score_threshold;
 
             // SAFETY: l is bounded by loop iterations, starting at 1 and incrementing
             // l <= q_size <= window_size, and f is sized to window_size + 1
@@ -368,8 +366,8 @@ impl Longdust {
             let sl = s - f_l;
 
             // Compute forward feasibility score sw
-            let sw_val = if (x & 1) == 0 {
-                let k = (x >> 1) as usize;
+            let sw_val = if (kmer_val & 1) == 0 {
+                let k = (kmer_val >> 1) as usize;
                 // SAFETY: k < 2^(2*kmer) = window_ht.len() and ht.len()
                 let wht_k = unsafe { *self.window_ht.get_unchecked(k) };
                 let ht_k = unsafe { *self.ht.get_unchecked(k) };
@@ -379,7 +377,7 @@ impl Longdust {
             } else {
                 0.0
             };
-            sw += sw_val - self.options.threshold;
+            sw += sw_val - self.options.score_threshold;
 
             // If forward can't reach, break
             if sw - f_l < 0.0 {
@@ -430,6 +428,11 @@ impl Longdust {
             if k == (q_size - 1) {
                 return pos;
             }
+            // If `self.options.approx` is enabled, we act greedily and accept the
+            // result of this first candidate immediately. We skip checking the
+            // remaining candidate positions in 'for_pos'. This guarantees O(L*w)
+            // performance by limiting the inner loop to 1 iteration, but we might
+            // miss a theoretically higher score that started at an earlier position.
             if self.options.approx {
                 break;
             }
@@ -438,19 +441,19 @@ impl Longdust {
         -1
     }
 
-    /// Forward scan starting at i0; returns index achieving max score or -1
+    // Forward scan starting at i0; returns index achieving max score or -1
     fn dust_forward(&mut self, i0: i32, max_back: f64) -> i32 {
         self.ht.fill(0);
         let mut max_i: i32 = -1;
         let mut max_sf: f64 = 0.0;
         let mut s: f64 = 0.0;
         let mut l: usize = 1;
-        let q_len = self.q.len();
+        let q_len = self.window.len();
         for i in (i0 as usize)..q_len {
             // SAFETY: i is in range [i0, q_len), verified by loop bounds
-            let x = unsafe { *self.q.get(i).unwrap_unchecked() };
-            let score_val = if (x & 1) == 0 {
-                let k = (x >> 1) as usize;
+            let kmer_val = unsafe { *self.window.get(i).unwrap_unchecked() };
+            let score_val = if (kmer_val & 1) == 0 {
+                let k = (kmer_val >> 1) as usize;
                 // SAFETY: k < 2^(2*kmer) = ht.len()
                 let htf_k = unsafe { *self.ht.get_unchecked(k) };
                 let new_htf_k = htf_k + 1;
@@ -463,7 +466,7 @@ impl Longdust {
             } else {
                 0.0
             };
-            s += score_val - self.options.threshold;
+            s += score_val - self.options.score_threshold;
 
             // SAFETY: l starts at 1, increments each iteration
             // l <= (q_len - i0) <= window_size, f is sized to window_size + 1
@@ -480,17 +483,17 @@ impl Longdust {
         max_i
     }
 
-    /// Quick backward-check heuristic: returns true if backward scan is worth trying
+    // Quick backward-check heuristic: returns true if backward scan is worth trying
     fn if_backward(&self, max_step: i32) -> bool {
         let mut s = 0.0;
-        for i in (0..self.q.len())
+        for i in (0..self.window.len())
             .rev()
-            .take((max_step as usize).min(self.q.len()))
+            .take((max_step as usize).min(self.window.len()))
         {
             // SAFETY: i is from the reverse iterator over 0..q.len(), so it's in bounds
-            let x = unsafe { *self.q.get(i).unwrap_unchecked() };
-            let val = if (x & 1) == 0 {
-                let k = (x >> 1) as usize;
+            let kmer_val = unsafe { *self.window.get(i).unwrap_unchecked() };
+            let val = if (kmer_val & 1) == 0 {
+                let k = (kmer_val >> 1) as usize;
                 // SAFETY: k < 2^(2*kmer) = window_ht.len()
                 let wht_k = unsafe { *self.window_ht.get_unchecked(k) };
                 // SAFETY: wht_k <= window_size, c is sized to window_size + 1
@@ -498,7 +501,7 @@ impl Longdust {
             } else {
                 0.0
             };
-            s += val - self.options.threshold;
+            s += val - self.options.score_threshold;
             if s < 0.0 {
                 return false;
             }
@@ -506,27 +509,27 @@ impl Longdust {
         true
     }
 
-    /// Try to extend at the last position in queue; returns 0 on success, -1 on fail
+    // Try to extend at the last position in queue. Returns 0 on success, -1 on fail
     fn extend(&mut self) -> i32 {
-        if self.q.is_empty() {
+        if self.window.is_empty() {
             return -1;
         }
-        let x = *self.q.back().unwrap();
-        if (x & 1) != 0 {
+        let kmer_val = *self.window.back().unwrap();
+        if (kmer_val & 1) != 0 {
             return -1;
         }
-        let k = (x >> 1) as usize;
-        let l = self.q.len().saturating_sub(1);
+        let k = (kmer_val >> 1) as usize;
+        let l = self.window.len() - 1;
         // SAFETY: k < 2^(2*kmer) = ht.len()
         let ht_k = unsafe { *self.ht.get_unchecked(k) };
-        let idx = (ht_k as usize).saturating_add(1);
+        let idx = ht_k as usize + 1;
         if idx >= self.c.len() || (l + 1) >= self.f.len() {
             return -1;
         }
         // SAFETY: We just checked idx < c.len() and l+1 < f.len()
         if unsafe { *self.c.get_unchecked(idx) }
             - (unsafe { *self.f.get_unchecked(l + 1) } - unsafe { *self.f.get_unchecked(l) })
-            < self.options.threshold
+            < self.options.score_threshold
         {
             return -1;
         }
@@ -537,13 +540,13 @@ impl Longdust {
         0
     }
 
-    /// Merge two sorted lists of intervals (forward and reverse) into results
+    // Merge two sorted lists of intervals (forward and reverse) into results
     fn merge_intervals(&mut self, fwd: Vec<Range<usize>>, rev: Vec<Range<usize>>) {
         self.results.clear();
         let mut i = 0;
         let mut j = 0;
-        let mut st = 0;
-        let mut en = 0;
+        let mut start = 0;
+        let mut end = 0;
 
         while i < fwd.len() || j < rev.len() {
             let intv: &Range<usize> = if j >= rev.len() {
@@ -560,53 +563,70 @@ impl Longdust {
                 &rev[j - 1]
             };
 
-            if intv.start <= en {
-                en = en.max(intv.end);
+            if intv.start <= end {
+                end = end.max(intv.end);
             } else {
-                if en > st {
-                    self.results.push(st..en);
+                if end > start {
+                    self.results.push(start..end);
                 }
-                st = intv.start;
-                en = intv.end;
+                start = intv.start;
+                end = intv.end;
             }
         }
-        if en > st {
-            self.results.push(st..en);
+        if end > start {
+            self.results.push(start..end);
         }
     }
 
-    /// Save an interval into results keeping the sorted/merged invariant
-    fn save_interval(&mut self, st: usize, en: usize) {
+    // Save an interval into results keeping the sorted/merged invariant
+    fn save_interval(&mut self, start: usize, end: usize) {
         let mut k = self.results.len();
-        while k > 0 && st <= self.results[k - 1].end {
+        while k > 0 && start <= self.results[k - 1].end {
             k -= 1;
         }
         if k < self.results.len() {
-            if st < self.results[k].start {
-                self.results[k].start = st;
+            if start < self.results[k].start {
+                self.results[k].start = start;
             }
-            if en > self.results[k].end {
-                self.results[k].end = en;
+            if end > self.results[k].end {
+                self.results[k].end = end;
             }
             self.results.truncate(k + 1);
         } else {
-            self.results.push(st..en);
+            self.results.push(start..end);
         }
     }
 
-    /// Math helpers for f() table computation
-    fn f_large(lambda: f64) -> f64 {
-        let x = 0.5 * (2.0 * PI * E * lambda).ln()
-            - 1.0 / (12.0 * lambda) * (1.0 + 0.5 / lambda + 19.0 / (30.0 * lambda * lambda));
-        x + lambda * (lambda.ln() - 1.0)
+    // Math helpers for f() table computation:
+
+    // Stirling's approximation for log(n!)
+    fn stirlings_approx(lambda: f64) -> f64 {
+        lambda * (lambda.ln() - 1.0) + 0.5 * (2.0 * PI * E * lambda).ln()
     }
 
+    // Calculates a high-precision approximation for the statistical score
+    // adjustment term f[L] when the expected k-mer frequency (lambda) is large (>= 30.0).
+    // It uses a specialized form of Stirling's approximation to ensure numerical stability
+    // and high performance, avoiding computationally expensive summations and overflows.
+    fn f_large(lambda: f64) -> f64 {
+        Self::stirlings_approx(lambda)
+            - 1.0 / (12.0 * lambda) * (1.0 + 0.5 / lambda + 19.0 / (30.0 * lambda * lambda))
+    }
+
+    // Calculates the default DUST score adjustment table (f[L]) for all lengths L <= max_l.
+    // This version assumes a uniform background (50% GC content) as it passes a
+    // density ratio (dr) of 1.0, making it an optimized shortcut for ld_cal_f2 when
+    // GC correction is disabled.
     fn calculate_f(k: usize, max_l: usize) -> Vec<f64> {
         let n_kmer = 1i32 << (2 * k);
         let dr = 1.0;
         Self::calculate_f_internal(k, max_l, 1, &[n_kmer], &[dr])
     }
 
+    // Calculates the DUST score adjustment table (f[L]) for all lengths L <= max_l.
+    // This version uses k-mer density ratios (dr) based on genome-wide GC content
+    // to adjust the expected scores, preventing over-masking of GC/AT-rich sequences.
+    // It relies on a summation for small lambda and f_large() for large lambda.
     fn calculate_f_gc(k: usize, max_l: usize, gc: f64) -> Vec<f64> {
         let n_kmer = 1usize << (2 * k);
         let mut dr = vec![0.0f64; k + 1];
@@ -634,6 +654,7 @@ impl Longdust {
         n_dr: &[i32],
         dr: &[f64],
     ) -> Vec<f64> {
+        const MAX_N: usize = 10000;
         let n_kmer = 1usize << (2 * k);
         let mut f = vec![0.0f64; max_l + 1];
         for (l, val) in f.iter_mut().enumerate().skip(1).take(max_l) {

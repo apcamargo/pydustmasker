@@ -1,30 +1,8 @@
 // Code adapted from: https://crates.io/crates/sdust
 
+use crate::common::encode_sequence;
 use std::collections::VecDeque;
 use std::ops::Range;
-
-/// Lookup to encode ASCII DNA letters into 0..4
-/// A -> 0, C -> 1, G -> 2, T -> 3, others -> 4
-const MASK: u8 = 63;
-const ENCODING_LOOKUP: [u8; 256] = {
-    let mut lookup = [4; 256];
-    lookup[b'A' as usize] = 0;
-    lookup[b'C' as usize] = 1;
-    lookup[b'G' as usize] = 2;
-    lookup[b'T' as usize] = 3;
-    lookup[b'a' as usize] = 0;
-    lookup[b'c' as usize] = 1;
-    lookup[b'g' as usize] = 2;
-    lookup[b't' as usize] = 3;
-    lookup
-};
-
-pub fn encode_sequence(sequence: &[u8]) -> Vec<u8> {
-    sequence
-        .iter()
-        .map(|&b| ENCODING_LOOKUP[b as usize])
-        .collect()
-}
 
 #[derive(Debug)]
 struct PerfectInterval {
@@ -34,7 +12,7 @@ struct PerfectInterval {
     l: usize,
 }
 
-/// Options for SymmetricDust
+// Options for SymmetricDust
 #[derive(Debug, Clone, Copy)]
 pub struct SymmetricDustOptions {
     // The length of the window used by symmetric DUST algorithm.
@@ -46,7 +24,7 @@ pub struct SymmetricDustOptions {
 }
 
 impl Default for SymmetricDustOptions {
-    /// Provides common default values for the DUST algorithm.
+    // Provides common default values for the DUST algorithm.
     fn default() -> Self {
         SymmetricDustOptions {
             // Default window size based on typical implementations (e.g., 64)
@@ -57,7 +35,7 @@ impl Default for SymmetricDustOptions {
     }
 }
 
-/// The main structure for the Symmetric DUST algorithm execution.
+// The main structure for the Symmetric DUST algorithm execution.
 #[derive(Debug)]
 pub struct SymmetricDust {
     // Parameters struct
@@ -79,7 +57,7 @@ pub struct SymmetricDust {
 }
 
 impl SymmetricDust {
-    /// Initialize and run the SymmetricDust algorithm on the input sequence
+    // Initialize and run the SymmetricDust algorithm on the input sequence
     pub fn process(sequence: &[u8], options: SymmetricDustOptions) -> Vec<(usize, usize)> {
         let mut obj = SymmetricDust {
             options,
@@ -95,18 +73,18 @@ impl SymmetricDust {
 
         let encoded_seq = encode_sequence(sequence);
         obj.inner_process(&encoded_seq);
-        let mut res = Vec::with_capacity(obj.results.len());
 
         // The algorithm can sometimes give end ranges outside of the sequence
         // https://github.com/lh3/sdust/issues/2
-        for mut range in obj.results {
-            range.end = std::cmp::min(range.end, sequence.len());
-            res.push((range.start, range.end));
-        }
-        res
+        obj.results
+            .into_iter()
+            .map(|r| (r.start, r.end.min(sequence.len())))
+            .collect()
     }
 
     fn inner_process(&mut self, encoded_seq: &[u8]) {
+        // Mask for triplet extraction (63 = 0b111111)
+        const MASK: u8 = 63;
         let mut triplet: u8 = 0;
         let mut l: usize = 0;
 
@@ -159,8 +137,8 @@ impl SymmetricDust {
         }
     }
 
-    /// Save all the intervals that are before the `window_start`
-    /// This can only insert one result at a time
+    // Save all the intervals that are before the `window_start`
+    // This can only insert one result at a time
     fn save_masked_regions(&mut self, window_start: usize) {
         if self.perfect_intervals.is_empty() {
             return;
@@ -195,7 +173,7 @@ impl SymmetricDust {
         }
     }
 
-    /// Add a triplet to the window, shifting all the data to represent the new window
+    // Add a triplet to the window, shifting all the data to represent the new window
     fn shift_window(&mut self, triplet: usize) {
         let mut s;
 
@@ -232,7 +210,7 @@ impl SymmetricDust {
         }
     }
 
-    /// Find all the perfect intervals in the window
+    // Find all the perfect intervals in the window
     fn find_perfect(&mut self, window_start: usize) {
         let mut c = self.cv;
         let mut r = self.rv;
