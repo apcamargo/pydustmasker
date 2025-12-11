@@ -55,7 +55,7 @@ fn validate_longdust_inputs(
         return Err(InputError::MinStartCntError(min_start_cnt));
     }
     if let Some(len) = xdrop {
-        if len <= 0 {
+        if len == 0 {
             return Err(InputError::XdropLenError(len));
         }
     }
