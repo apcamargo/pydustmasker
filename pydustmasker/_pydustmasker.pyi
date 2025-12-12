@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator
+from typing import overload
 
 __version__: str
 
@@ -23,7 +24,7 @@ class _BaseMasker:
     """
 
     sequence: str
-    intervals: Sequence[tuple[int, int]]
+    intervals: tuple[tuple[int, int]]
 
     @property
     def n_masked_bases(self) -> int: ...
@@ -39,7 +40,14 @@ class _BaseMasker:
             lowercase (i.e., soft-masking).
         """
         ...
-    def __repr__(self) -> str: ...
+        def __repr__(self) -> str: ...
+        def __len__(self) -> int: ...
+        def __iter__(self) -> Iterator[tuple[int, int]]: ...
+        @overload
+        def __getitem__(self, index: int) -> tuple[int, int]: ...
+        @overload
+        def __getitem__(self, index: slice) -> tuple[tuple[int, int]]: ...
+        def __getitem__(self, index: int | slice) -> tuple[int, int] | tuple[tuple[int, int]]: ...
 
 class DustMasker(_BaseMasker):
     """
@@ -116,6 +124,10 @@ class LongdustMasker(_BaseMasker):
         Score threshold for identifying low-complexity regions.
     kmer : int, default: 7
         The k-mer length used by the Longdust algorithm. Must be at least 1.
+    gc : float | 'auto' | None, default: None
+        GC content for bias correction. If None (default), assume a uniform base
+        composition. If 'auto', compute GC from the input sequence. If a float
+        between 0.0 and 1.0, use that value.
     xdrop : int | None, default: 50
         Maximum allowable score drop for X-drop extension termination. During
         backward scanning, extension continues as long as (max_score - current_score)
@@ -137,10 +149,6 @@ class LongdustMasker(_BaseMasker):
         In this mode, only the first candidate starting position is examined
         during backward scanning, rather than checking all candidates to find
         the optimal one.
-    gc : float | 'auto' | None, default: None
-        GC content for bias correction. If None (default), assume a uniform base
-        composition. If 'auto', compute GC from the input sequence. If a float
-        between 0.0 and 1.0, use that value.
     forward_only : bool, default: False
         If True, only process the forward strand. By default, both strands are processed.
 
@@ -154,6 +162,10 @@ class LongdustMasker(_BaseMasker):
         Score threshold for determining low-complexity regions.
     kmer : int
         k-mer length.
+    gc : float | 'auto' | None
+        Option used for GC bias correction. Can be None (a uniform base composition
+        was assumed), 'auto' (GC was computed from the input sequence), or a float
+        between 0.0 and 1.0 (provided by the user).
     xdrop : int | None
         Extension X-drop length.
     min_start_cnt : int
@@ -194,6 +206,7 @@ class LongdustMasker(_BaseMasker):
     window_size: int
     score_threshold: float
     kmer: int
+    gc: float | str | None
     xdrop: int | None
     min_start_cnt: int
     approx: bool
@@ -205,9 +218,9 @@ class LongdustMasker(_BaseMasker):
         window_size: int = 5000,
         score_threshold: float = 0.6,
         kmer: int = 7,
+        gc: float | str | None = None,
         xdrop: int | None = 50,
         min_start_cnt: int = 3,
         approx: bool = False,
-        gc: float | str | None = None,
         forward_only: bool = False,
     ) -> None: ...

@@ -4,7 +4,12 @@ mod sdust;
 
 use crate::longdust::{GcOption, Longdust, LongdustOptions};
 use crate::sdust::{SymmetricDust, SymmetricDustOptions};
-use pyo3::{exceptions::PyValueError, prelude::*};
+use pyo3::{
+    exceptions::{PyIndexError, PyTypeError, PyValueError},
+    prelude::*,
+    types::{PyAny, PySlice, PyTuple},
+    IntoPyObjectExt,
+};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -72,8 +77,8 @@ fn validate_symmetricdust_inputs(sequence: &str, window_size: usize) -> Result<(
     Ok(())
 }
 
-/// Helper to parse GC option from Python input
-fn parse_gc_option(gc: Option<&Bound<'_, PyAny>>) -> PyResult<GcOption> {
+/// Helper to parse the GC parameter from the Python input
+fn parse_gc_config(gc: Option<&Bound<'_, PyAny>>) -> PyResult<GcOption> {
     if let Some(obj) = gc {
         if let Ok(val) = obj.extract::<f64>() {
             return Ok(GcOption::Fixed(val));
@@ -90,20 +95,92 @@ fn parse_gc_option(gc: Option<&Bound<'_, PyAny>>) -> PyResult<GcOption> {
     }
 }
 
+#[pyclass]
+struct BaseMaskerIter {
+    masker: Py<BaseMasker>,
+    index: usize,
+}
+
+#[pymethods]
+impl BaseMaskerIter {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(&mut self, py: Python<'_>) -> Option<(usize, usize)> {
+        // Borrow the masker to access intervals
+        let masker = self.masker.borrow(py);
+        if self.index < masker.intervals.len() {
+            let item = masker.intervals[self.index];
+            self.index += 1;
+            Some(item)
+        } else {
+            None
+        }
+    }
+}
+
 /// Base class for sequence masking.
 #[pyclass(subclass, name = "_BaseMasker")]
 struct BaseMasker {
     #[pyo3(get)]
     sequence: String,
-    #[pyo3(get)]
     intervals: Vec<(usize, usize)>,
 }
 
 #[pymethods]
 impl BaseMasker {
     #[getter]
+    fn intervals(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let tuple = PyTuple::new(py, &self.intervals)?;
+        Ok(tuple.into_any().unbind())
+    }
+
+    #[getter]
     fn n_masked_bases(&self) -> usize {
         self.intervals.iter().map(|(start, end)| end - start).sum()
+    }
+
+    fn __len__(&self) -> usize {
+        self.intervals.len()
+    }
+
+    fn __iter__(slf: PyRef<'_, Self>) -> BaseMaskerIter {
+        BaseMaskerIter {
+            masker: slf.into(),
+            index: 0,
+        }
+    }
+
+    fn __getitem__(&self, item: Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+        let py = item.py();
+        let len = self.intervals.len();
+
+        if let Ok(slice) = item.extract::<Bound<'_, PySlice>>() {
+            let indices = slice.indices(len.try_into().unwrap())?;
+            let mut result = Vec::with_capacity(indices.slicelength as usize);
+            let mut i = indices.start;
+            for _ in 0..indices.slicelength {
+                if i >= 0 && (i as usize) < len {
+                    result.push(self.intervals[i as usize]);
+                }
+                i += indices.step;
+            }
+            // Converts Vec<(usize, usize)> to a Python tuple of tuples
+            let tuple = PyTuple::new(py, result)?;
+            Ok(tuple.into_any().unbind())
+        } else if let Ok(idx) = item.extract::<isize>() {
+            let mut idx = idx;
+            if idx < 0 {
+                idx += len as isize;
+            }
+            if idx < 0 || idx >= len as isize {
+                return Err(PyIndexError::new_err("list index out of range"));
+            }
+            Ok(self.intervals[idx as usize].into_py_any(py)?)
+        } else {
+            Err(PyTypeError::new_err("indices must be integers or slices"))
+        }
     }
 
     /// Returns the sequence with low-complexity regions masked.
@@ -118,7 +195,7 @@ impl BaseMasker {
     /// Raises
     /// ------
     /// TypeError
-    ///    If the input parameters are not of the expected type.
+    ///     If the input parameters are not of the expected type.
     #[pyo3(signature = (hard=false))]
     fn mask(&self, hard: bool) -> String {
         let mut masked_sequence = self.sequence.clone();
@@ -136,16 +213,31 @@ impl BaseMasker {
 
     fn __repr__(slf: &Bound<'_, Self>) -> PyResult<String> {
         let class_name = slf.get_type().name()?;
-        let sequence_preview = if slf.borrow().sequence.len() > 8 {
-            format!("{}…", &slf.borrow().sequence[..8])
+        let inner = slf.borrow();
+        let sequence_preview = if inner.sequence.len() > 8 {
+            format!("{}…", &inner.sequence[..8])
         } else {
-            slf.borrow().sequence.clone()
+            inner.sequence.clone()
         };
+
+        let mut intervals_repr = String::from("(");
+        for (i, (start, end)) in inner.intervals.iter().take(3).enumerate() {
+            if i > 0 {
+                intervals_repr.push_str(", ");
+            }
+            intervals_repr.push_str(&format!("({}, {})", start, end));
+        }
+
+        if inner.intervals.len() > 3 {
+            intervals_repr.push_str(", …");
+        }
+        intervals_repr.push(')');
+
         Ok(format!(
-            "{}(sequence: '{}', intervals: {:?})",
+            "{}(sequence: '{}', intervals: {})",
             class_name,
             sequence_preview,
-            slf.borrow().intervals
+            intervals_repr
         ))
     }
 }
@@ -174,8 +266,8 @@ impl BaseMasker {
 ///     The length of the window used by symmetric DUST algorithm.
 /// score_threshold : int
 ///     Score threshold for identifying low-complexity regions.
-/// intervals : list of tuples
-///    A immutable list of tuples representing the start and end positions of
+/// intervals : tuple of tuples
+///    An immutable tuple of tuples representing the start and end positions of
 ///    the low-complexity regions identified in the sequence.
 /// n_masked_bases : int
 ///     The total number of bases that were masked.
@@ -289,6 +381,10 @@ impl DustMasker {
 ///     Score threshold for determining low-complexity regions.
 /// kmer : int
 ///     k-mer length.
+/// gc : float | 'auto' | None
+///     Option used for GC bias correction. Can be None (a uniform base composition
+///     was assumed), 'auto' (GC was computed from the input sequence), or a float
+///     between 0.0 and 1.0 (provided by the user).
 /// xdrop : int | None
 ///     Extension X-drop length.
 /// min_start_cnt : int
@@ -297,8 +393,8 @@ impl DustMasker {
 ///     Whether approximate mode was enabled.
 /// forward_only : bool
 ///     Whether only the forward strand was processed.
-/// intervals: list of tuples
-///    A immutable list of tuples representing the start and end positions of
+/// intervals: tuple of tuples
+///    An immutable tuple of tuples representing the start and end positions of
 ///    the low-complexity regions identified in the sequence.
 /// n_masked_bases : int
 ///     The total number of bases that were masked.
@@ -332,6 +428,7 @@ struct LongdustMasker {
     score_threshold: f64,
     #[pyo3(get)]
     kmer: usize,
+    gc: GcOption,
     #[pyo3(get)]
     xdrop: Option<usize>,
     #[pyo3(get)]
@@ -350,10 +447,10 @@ impl LongdustMasker {
         window_size=5000,
         score_threshold=0.6,
         kmer=7,
+        gc=None,
         xdrop=Some(50),
         min_start_cnt=3,
         approx=false,
-        gc=None,
         forward_only=false
     ))]
     #[allow(clippy::too_many_arguments)]
@@ -362,33 +459,32 @@ impl LongdustMasker {
         window_size: usize,
         score_threshold: f64,
         kmer: usize,
+        gc: Option<&Bound<'_, PyAny>>,
         xdrop: Option<usize>,
         min_start_cnt: u16,
         approx: bool,
-        gc: Option<&Bound<'_, PyAny>>,
         forward_only: bool,
     ) -> PyResult<(LongdustMasker, BaseMasker)> {
-        let gc_option = parse_gc_option(gc)?;
-
+        let gc_config = parse_gc_config(gc)?;
         validate_longdust_inputs(
             &sequence,
             window_size,
             kmer,
             score_threshold,
-            &gc_option,
+            &gc_config,
             min_start_cnt,
             xdrop,
         )
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
         let options = LongdustOptions {
-            kmer,
             window_size,
             score_threshold,
+            kmer,
+            gc: gc_config,
             xdrop,
             min_start_cnt,
             approx,
-            gc: gc_option,
             forward_only,
         };
 
@@ -399,6 +495,7 @@ impl LongdustMasker {
                 window_size,
                 score_threshold,
                 kmer,
+                gc: gc_config,
                 xdrop,
                 min_start_cnt,
                 approx,
@@ -410,11 +507,31 @@ impl LongdustMasker {
             },
         ))
     }
+    /// Expose the resolved GC option as a Python attribute.
+    /// Returns a float, 'auto', or None.
+    #[getter]
+    fn gc(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        match &self.gc {
+            // Convert f64 to a Python float
+            GcOption::Fixed(val) => {
+                Ok(val.into_pyobject(py)?.into_any().unbind())
+            },
+            // Convert string to a Python str
+            GcOption::Auto => {
+                Ok("auto".into_pyobject(py)?.into_any().unbind())
+            },
+            // Return Python None
+            GcOption::Uniform => {
+                Ok(py.None())
+            }
+        }
+    }
 }
 
 #[pymodule]
 fn _pydustmasker(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<BaseMasker>()?;
+    m.add_class::<BaseMaskerIter>()?;
     m.add_class::<DustMasker>()?;
     m.add_class::<LongdustMasker>()?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;

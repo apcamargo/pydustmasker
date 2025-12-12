@@ -24,20 +24,20 @@ pub enum GcOption {
 // Options for Longdust
 #[derive(Debug, Clone, Copy)]
 pub struct LongdustOptions {
-    // The k-mer size used by the Longdust algorithm
-    pub kmer: usize,
     // The size of the sliding window
     pub window_size: usize,
     // Score threshold for identifying low-complexity regions
     pub score_threshold: f64,
+    // The k-mer size used by the Longdust algorithm
+    pub kmer: usize,
+    // GC content handling mode
+    pub gc: GcOption,
     // X-drop extension length: None=disabled (use full window), Some(n)=limit to n
     pub xdrop: Option<usize>,
     // Minimum k-mer count to trigger backward scan
     pub min_start_cnt: u16,
     // Use approximate mode (faster but less accurate)
     pub approx: bool,
-    // GC content handling mode
-    pub gc: GcOption,
     // Only scan forward strand (skip reverse complement)
     pub forward_only: bool,
 }
@@ -45,14 +45,14 @@ pub struct LongdustOptions {
 impl Default for LongdustOptions {
     fn default() -> Self {
         Self {
-            kmer: 7,
             window_size: 5000,
             score_threshold: 0.6,
+            kmer: 7,
             gc: GcOption::Uniform,
             xdrop: Some(50),
             min_start_cnt: 3,
-            forward_only: false,
             approx: false,
+            forward_only: false,
         }
     }
 }
