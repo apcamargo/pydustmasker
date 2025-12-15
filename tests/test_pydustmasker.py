@@ -7,7 +7,7 @@ def test_dust_masker_creation():
     assert masker.window_size == 64
     assert masker.score_threshold == 20
     assert masker.intervals == ((2, 9), (12, 19))
-    assert isinstance(masker.intervals, list)
+    assert isinstance(masker.intervals, tuple)
 
 
 def test_n_masked_bases():
