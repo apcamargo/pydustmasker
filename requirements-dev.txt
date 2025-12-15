@@ -1,7 +1,7 @@
-mypy==1.19.0
+mypy==1.19.1
 pre-commit==4.5.0
 pytest==9.0.2
 pytest-cov==7.0.0
-ruff==0.14.8
+ruff==0.14.9
 maturin==1.10.2
 -e .
