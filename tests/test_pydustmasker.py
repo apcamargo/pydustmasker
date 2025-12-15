@@ -62,25 +62,25 @@ def test_score_threshold():
 
 
 def test_ambigious():
-    # no ambiguous
+    # No ambiguous
     seq1 = "GCCAGGCTGGCCAAGGAGATCttttttttttttttttttttttttAAGAGACCATGGCATGCACTGGCCAAGGAGATCttttttttttttttttttttttttAAGA"
     assert DustMasker(seq1, window_size=64).intervals == ((21, 45), (78, 102))
-    # with ambiguous
+    # With ambiguous
     seq2 = "GCCAGGCTGGCCAAGGAGATTCttttttttttttttttttttttttAAGAGCCARYCTGGCCAAGGAGANTCttttttttttttttttttttttttAAGA"
     assert DustMasker(seq2, window_size=64).intervals == ((22, 46), (72, 96))
-    # with ambiguous and masks
+    # With ambiguous and masks
     seq3 = "GCCAGGCTGGCCAAGGAGATTCttttttttttttttttttttttttAFGAGCCAGGCTGGCCAAGGAGANTCtttttttttnNnttttttttAAGA"
     assert DustMasker(seq3, window_size=64).intervals == ((22, 46), (72, 81), (84, 92))
 
 
 def test_errors_creation():
-    # sequence too short -> ValueError
+    # Sequence too short -> ValueError
     with pytest.raises(ValueError):
         DustMasker("AAA", window_size=64)
-    # window_size too small -> ValueError
+    # Window_size too small -> ValueError
     with pytest.raises(ValueError):
         DustMasker("ACGTACGT", window_size=3)
-    # negative integers for size/threshold should raise OverflowError when converting to unsigned types
+    # Negative integers for parameters that are converted to unsigned types should raise OverflowError
     with pytest.raises(OverflowError):
         DustMasker("ACGTACGT", window_size=-1)
     with pytest.raises(OverflowError):
