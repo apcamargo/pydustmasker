@@ -47,9 +47,6 @@ class _BaseMasker:
     def __getitem__(self, index: int) -> tuple[int, int]: ...
     @overload
     def __getitem__(self, index: slice) -> tuple[tuple[int, int]]: ...
-    def __getitem__(
-        self, index: int | slice
-    ) -> tuple[int, int] | tuple[tuple[int, int]]: ...
 
 class DustMasker(_BaseMasker):
     """

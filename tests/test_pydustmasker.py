@@ -87,6 +87,6 @@ def test_errors_creation():
         DustMasker("ACGTACGT", window_size=64, score_threshold=-5)
     # wrong types should raise TypeError
     with pytest.raises(TypeError):
-        DustMasker(12345, window_size=64)
+        DustMasker(12345, window_size=64)  # type: ignore
     with pytest.raises(TypeError):
-        DustMasker("ACGTACGT", window_size="foo")
+        DustMasker("ACGTACGT", window_size="foo")  # type: ignore
