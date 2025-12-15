@@ -158,7 +158,7 @@ impl BaseMasker {
 
         if let Ok(slice) = item.extract::<Bound<'_, PySlice>>() {
             let indices = slice.indices(len.try_into().unwrap())?;
-            let mut result = Vec::with_capacity(indices.slicelength as usize);
+            let mut result = Vec::with_capacity(indices.slicelength);
             let mut i = indices.start;
             for _ in 0..indices.slicelength {
                 if i >= 0 && (i as usize) < len {
@@ -235,9 +235,7 @@ impl BaseMasker {
 
         Ok(format!(
             "{}(sequence: '{}', intervals: {})",
-            class_name,
-            sequence_preview,
-            intervals_repr
+            class_name, sequence_preview, intervals_repr
         ))
     }
 }
@@ -513,17 +511,11 @@ impl LongdustMasker {
     fn gc(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         match &self.gc {
             // Convert f64 to a Python float
-            GcOption::Fixed(val) => {
-                Ok(val.into_pyobject(py)?.into_any().unbind())
-            },
+            GcOption::Fixed(val) => Ok(val.into_pyobject(py)?.into_any().unbind()),
             // Convert string to a Python str
-            GcOption::Auto => {
-                Ok("auto".into_pyobject(py)?.into_any().unbind())
-            },
+            GcOption::Auto => Ok("auto".into_pyobject(py)?.into_any().unbind()),
             // Return Python None
-            GcOption::Uniform => {
-                Ok(py.None())
-            }
+            GcOption::Uniform => Ok(py.None()),
         }
     }
 }
