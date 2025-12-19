@@ -49,31 +49,31 @@ def test_repr():
     assert "DustMasker(sequence: 'GTACCCCC…', intervals: ((3, 10)))" == repr(masker)
 
 
-def test_window_size():
+def test_dustmasker_window_size():
     masker = DustMasker("TACCCCCCCGCGTTTTTTT", window_size=4, score_threshold=20)
     assert masker.window_size == 4
     assert masker.intervals == ()
 
 
-def test_score_threshold():
+def test_dustmasker_score_threshold():
     masker = DustMasker("TACCCCCCCGCGTTTTTTT", window_size=64, score_threshold=128)
     assert masker.score_threshold == 128
     assert masker.intervals == ()
 
 
-def test_ambigious():
+def test_dustmasker_ambigious():
     # No ambiguous
-    seq1 = "GCCAGGCTGGCCAAGGAGATCttttttttttttttttttttttttAAGAGACCATGGCATGCACTGGCCAAGGAGATCttttttttttttttttttttttttAAGA"
-    assert DustMasker(seq1, window_size=64).intervals == ((21, 45), (78, 102))
+    seq1 = "GCCAGGCTGGCCATCttttttttttttttttttttttttAAGAGACCATGGCATGCACTGGCCAAGGAGATCttttttttttttttttttttttttAAGA"
+    assert DustMasker(seq1, window_size=64).intervals == ((15, 39), (72, 96))
     # With ambiguous
-    seq2 = "GCCAGGCTGGCCAAGGAGATTCttttttttttttttttttttttttAAGAGCCARYCTGGCCAAGGAGANTCttttttttttttttttttttttttAAGA"
-    assert DustMasker(seq2, window_size=64).intervals == ((22, 46), (72, 96))
+    seq2 = "GCCAGGCTGGCCATTCttttttttttttttttttttttttAAGAGCCARYCTGGCCAAGGAGANTCttttttttttttttttttttttttAAGA"
+    assert DustMasker(seq2, window_size=64).intervals == ((16, 40), (66, 90))
     # With ambiguous and masks
-    seq3 = "GCCAGGCTGGCCAAGGAGATTCttttttttttttttttttttttttAFGAGCCAGGCTGGCCAAGGAGANTCtttttttttnNnttttttttAAGA"
-    assert DustMasker(seq3, window_size=64).intervals == ((22, 46), (72, 81), (84, 92))
+    seq3 = "GCCAGGCTGGCCATTCttttttttttttttttttttttttAFGAGCCAGGCTGGCCAAGGAGANTCtttttttttnNnttttttttAAGA"
+    assert DustMasker(seq3, window_size=64).intervals == ((16, 40), (66, 75), (78, 86))
 
 
-def test_errors_creation():
+def test_constructor_invalid_parameters():
     # Sequence too short -> ValueError
     with pytest.raises(ValueError):
         DustMasker("AAA", window_size=64)

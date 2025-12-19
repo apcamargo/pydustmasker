@@ -30,51 +30,62 @@ pub enum InputError {
     XdropLenError(usize),
 }
 
-fn validate_longdust_inputs(
+impl From<InputError> for PyErr {
+    fn from(err: InputError) -> PyErr {
+        PyValueError::new_err(err.to_string())
+    }
+}
+
+trait Validate {
+    fn validate_inputs(&self, sequence: &str) -> Result<(), InputError>;
+}
+
+fn validate_base_params(
     sequence: &str,
     window_size: usize,
-    kmer: usize,
-    score_threshold: f64,
-    gc: &GcOption,
-    min_start_cnt: u16,
-    xdrop: Option<usize>,
+    min_len: usize,
 ) -> Result<(), InputError> {
-    if sequence.len() < kmer + 1 {
-        return Err(InputError::SequenceLengthError(sequence.len(), kmer + 1));
+    if sequence.len() < min_len {
+        return Err(InputError::SequenceLengthError(sequence.len(), min_len));
     }
-    if window_size < kmer + 1 {
-        return Err(InputError::WindowSizeError(window_size, kmer + 1));
-    }
-    if kmer == 0 {
-        return Err(InputError::KmerSizeError(kmer));
-    }
-    if score_threshold <= 0.0 {
-        return Err(InputError::ScoreThresholdError(score_threshold));
-    }
-    if let GcOption::Fixed(gc_val) = gc {
-        if !(0.0..=1.0).contains(gc_val) {
-            return Err(InputError::GcError(*gc_val));
-        }
-    }
-    if min_start_cnt < 2 {
-        return Err(InputError::MinStartCntError(min_start_cnt));
-    }
-    if let Some(len) = xdrop {
-        if len == 0 {
-            return Err(InputError::XdropLenError(len));
-        }
+    if window_size < min_len {
+        return Err(InputError::WindowSizeError(window_size, min_len));
     }
     Ok(())
 }
 
-fn validate_symmetricdust_inputs(sequence: &str, window_size: usize) -> Result<(), InputError> {
-    if sequence.len() < 4 {
-        return Err(InputError::SequenceLengthError(sequence.len(), 4));
+impl Validate for SymmetricDustOptions {
+    fn validate_inputs(&self, sequence: &str) -> Result<(), InputError> {
+        validate_base_params(sequence, self.window_size, 4)
     }
-    if window_size < 4 {
-        return Err(InputError::WindowSizeError(window_size, 4));
+}
+
+impl Validate for LongdustOptions {
+    fn validate_inputs(&self, sequence: &str) -> Result<(), InputError> {
+        let min_len = self.kmer + 1;
+        validate_base_params(sequence, self.window_size, min_len)?;
+
+        if self.kmer == 0 {
+            return Err(InputError::KmerSizeError(self.kmer));
+        }
+        if self.score_threshold <= 0.0 {
+            return Err(InputError::ScoreThresholdError(self.score_threshold));
+        }
+        if let GcOption::Fixed(gc_val) = self.gc {
+            if !(0.0..=1.0).contains(&gc_val) {
+                return Err(InputError::GcError(gc_val));
+            }
+        }
+        if self.min_start_cnt < 2 {
+            return Err(InputError::MinStartCntError(self.min_start_cnt));
+        }
+        if let Some(len) = self.xdrop {
+            if len == 0 {
+                return Err(InputError::XdropLenError(len));
+            }
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 /// Helper to parse the GC parameter from the Python input
@@ -302,15 +313,12 @@ impl DustMasker {
         window_size: usize,
         score_threshold: usize,
     ) -> PyResult<(DustMasker, BaseMasker)> {
-        validate_symmetricdust_inputs(&sequence, window_size)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        let intervals = SymmetricDust::process(
-            sequence.as_bytes(),
-            SymmetricDustOptions {
-                window_size,
-                score_threshold,
-            },
-        );
+        let options = SymmetricDustOptions {
+            window_size,
+            score_threshold,
+        };
+        options.validate_inputs(&sequence)?;
+        let intervals = SymmetricDust::process(sequence.as_bytes(), options);
         Ok((
             DustMasker {
                 window_size,
@@ -464,17 +472,6 @@ impl LongdustMasker {
         forward_only: bool,
     ) -> PyResult<(LongdustMasker, BaseMasker)> {
         let gc_config = parse_gc_config(gc)?;
-        validate_longdust_inputs(
-            &sequence,
-            window_size,
-            kmer,
-            score_threshold,
-            &gc_config,
-            min_start_cnt,
-            xdrop,
-        )
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
-
         let options = LongdustOptions {
             window_size,
             score_threshold,
@@ -485,6 +482,8 @@ impl LongdustMasker {
             approx,
             forward_only,
         };
+
+        options.validate_inputs(&sequence)?;
 
         let intervals = Longdust::process(sequence.as_bytes(), options);
 
