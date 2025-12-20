@@ -108,7 +108,8 @@ impl SymmetricDust {
                     }
                 }
             } else {
-                // suggested fix for Ambiguous nucleotides causing end ranges falling outside of the sequence
+                // Suggested fix for Ambiguous nucleotides causing end ranges
+                // falling outside of the sequence
                 // https://github.com/lh3/sdust/issues/2
                 // A `N` (or end‐of‐seq) resets the sequence:
                 // 1) flush any pending perfect intervals
