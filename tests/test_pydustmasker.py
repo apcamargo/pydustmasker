@@ -169,6 +169,14 @@ def test_longdustmasker_gc_none_vs_float():
     assert m2.intervals == ((64, 74),)
 
 
+def test_longdustmasker_gc_none_vs_auto():
+    seq = "CCATTGGATATAAATTCTCACTTCTGTTTTAGACATAAAATTATAATCAAAAGATTAATTATATTACTCAGTTCTTAAGAAGCAAAAGA"
+    m1 = LongdustMasker(seq, gc=None, score_threshold=0.1, window_size=64, kmer=3)
+    m2 = LongdustMasker(seq, gc="auto", score_threshold=0.1, window_size=64, kmer=3)
+    assert m1.intervals == ((6, 89),)
+    assert m2.intervals == ((7, 12), (34, 66), (76, 89))
+
+
 def test_longdustmasker_forward_only():
     seq = "ACAGAAAAATGCGTACCCATCCACCTTTCAGTGCGTACCCACCCATCCACCTTTCAGTGCGTACCCATCCACCTTTCATTT"
     m1 = LongdustMasker(seq, forward_only=False, score_threshold=0.1, window_size=64)
