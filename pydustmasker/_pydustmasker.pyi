@@ -13,9 +13,9 @@ class _BaseMasker:
     ----------
     sequence : str
         The nucleotide sequence that was provided as input.
-    intervals: list of tuples
-        A immutable list of tuples representing the start and end positions of
-        the low-complexity regions identified in the sequence.
+    intervals: tuple of tuples
+        A tuple of tuples representing the start and end positions of the
+        low-complexity regions identified in the sequence.
 
     Methods
     -------
@@ -74,9 +74,9 @@ class DustMasker(_BaseMasker):
         The length of the window used by symmetric DUST algorithm.
     score_threshold : int
         Score threshold for identifying low-complexity regions.
-    intervals : list of tuples
-       A immutable list of tuples representing the start and end positions of
-       the low-complexity regions identified in the sequence.
+    intervals: tuple of tuples
+        A tuple of tuples representing the start and end positions of the
+        low-complexity regions identified in the sequence.
     n_masked_bases : int
         The total number of bases that were masked.
 
@@ -173,9 +173,9 @@ class LongdustMasker(_BaseMasker):
         Whether approximate mode was enabled.
     forward_only : bool
         Whether only the forward strand was processed.
-    intervals: list of tuples
-       A immutable list of tuples representing the start and end positions of
-       the low-complexity regions identified in the sequence.
+    intervals: tuple of tuples
+        A tuple of tuples representing the start and end positions of the
+        low-complexity regions identified in the sequence.
     n_masked_bases : int
         The total number of bases that were masked.
 
