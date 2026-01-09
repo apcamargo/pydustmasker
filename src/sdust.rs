@@ -1,21 +1,8 @@
 // Code adapted from: https://crates.io/crates/sdust
 
+use crate::common::encode_sequence;
 use std::collections::VecDeque;
 use std::ops::Range;
-
-const MASK: u8 = 63;
-const ENCODING_LOOKUP: [u8; 256] = {
-    let mut lookup = [4; 256];
-    lookup[b'A' as usize] = 0;
-    lookup[b'C' as usize] = 1;
-    lookup[b'G' as usize] = 2;
-    lookup[b'T' as usize] = 3;
-    lookup[b'a' as usize] = 0;
-    lookup[b'c' as usize] = 1;
-    lookup[b'g' as usize] = 2;
-    lookup[b't' as usize] = 3;
-    lookup
-};
 
 #[derive(Debug)]
 struct PerfectInterval {
@@ -25,21 +12,39 @@ struct PerfectInterval {
     l: usize,
 }
 
+// Options for SymmetricDust
+#[derive(Debug, Clone, Copy)]
+pub struct SymmetricDustOptions {
+    // The length of the window used by symmetric DUST algorithm.
+    // `W` in the paper.
+    pub window_size: usize,
+    // 10 times the score threshold used by symmetric DUST algorithm.
+    // `T` in the paper.
+    pub score_threshold: usize,
+}
+
+impl Default for SymmetricDustOptions {
+    // Provides common default values for the DUST algorithm.
+    fn default() -> Self {
+        SymmetricDustOptions {
+            // Default window size based on typical implementations (e.g., 64)
+            window_size: 64,
+            // Default score threshold (e.g., 20)
+            score_threshold: 20,
+        }
+    }
+}
+
+// The main structure for the Symmetric DUST algorithm execution.
 #[derive(Debug)]
-pub struct SymmetricDust<'a> {
-    /// `q` in the paper
-    sequence: &'a [u8],
-    /// The length of the window used by symmetric DUST algorithm
-    /// `W` in the paper
-    window_size: usize,
-    /// 10 times the score threshold used by symmetric DUST algorithm.
-    /// `T` in the paper
-    score_threshold: usize,
-    /// `P` in the paper
+pub struct SymmetricDust {
+    // Parameters struct
+    options: SymmetricDustOptions,
+    // `P` in the paper - stores detected intervals that meet the criteria
     perfect_intervals: VecDeque<PerfectInterval>,
-    /// `res` in the paper
+    // `res` in the paper - the final, merged results
     results: Vec<Range<usize>>,
-    /// `w` in the paper
+    // `w` in the paper - the sliding window of triplets
     window: VecDeque<usize>,
     // counts in the current window
     cv: [usize; 64],
@@ -47,20 +52,15 @@ pub struct SymmetricDust<'a> {
     // runnings counts
     rv: usize,
     rw: usize,
-    /// `L` in the paper
+    // `L` in the paper - The biggest number of triplets whose count is <= 2*T/10
     biggest_num_triplets: usize,
 }
 
-impl<'a> SymmetricDust<'a> {
-    pub fn process(
-        sequence: &'a [u8],
-        window_size: usize,
-        score_threshold: usize,
-    ) -> Vec<(usize, usize)> {
+impl SymmetricDust {
+    // Initialize and run the SymmetricDust algorithm on the input sequence
+    pub fn process(sequence: &[u8], options: SymmetricDustOptions) -> Vec<(usize, usize)> {
         let mut obj = SymmetricDust {
-            sequence,
-            window_size,
-            score_threshold,
+            options,
             perfect_intervals: VecDeque::new(),
             results: Vec::new(),
             window: VecDeque::new(),
@@ -71,29 +71,25 @@ impl<'a> SymmetricDust<'a> {
             biggest_num_triplets: 0,
         };
 
-        obj.inner_process();
-        let mut res = Vec::with_capacity(obj.results.len());
+        let encoded_seq = encode_sequence(sequence);
+        obj.inner_process(&encoded_seq);
 
         // The algorithm can sometimes give end ranges outside of the sequence
         // https://github.com/lh3/sdust/issues/2
-        for mut range in obj.results {
-            range.end = std::cmp::min(range.end, sequence.len());
-            res.push((range.start, range.end));
-        }
-        res
+        obj.results
+            .into_iter()
+            .map(|r| (r.start, r.end.min(sequence.len())))
+            .collect()
     }
 
-    fn inner_process(&mut self) {
-        // We're going to represent 3 chars in that u8
+    fn inner_process(&mut self, encoded_seq: &[u8]) {
+        // Mask for triplet extraction (63 = 0b111111)
+        const MASK: u8 = 63;
         let mut triplet: u8 = 0;
         let mut l: usize = 0;
-        for i in 0..=self.sequence.len() {
-            let b = if i < self.sequence.len() {
-                ENCODING_LOOKUP[self.sequence[i] as usize]
-            } else {
-                4
-            };
 
+        // The chain ensures the loop executes one last time with '4' (non-ACGT) for cleanup
+        for (i, &b) in encoded_seq.iter().chain([4].iter()).enumerate() {
             // A/T/C/G
             if b < 4 {
                 l += 1;
@@ -101,33 +97,36 @@ impl<'a> SymmetricDust<'a> {
 
                 // We have at least 3 chars, we can look at them
                 if l >= 3 {
-                    let window_start = l.saturating_sub(self.window_size) + i + 1 - l;
+                    // Calculate the starting position in the original sequence
+                    let window_start = l.saturating_sub(self.options.window_size) + i + 1 - l;
+
                     self.save_masked_regions(window_start);
                     self.shift_window(triplet as usize);
-                    if self.rw * 10 > self.biggest_num_triplets * self.score_threshold {
+
+                    if self.rw * 10 > self.biggest_num_triplets * self.options.score_threshold {
                         self.find_perfect(window_start);
                     }
                 }
             } else {
-                // suggested fix for Ambiguous nucleotides causing end ranges falling outside of the sequence
+                // Suggested fix for Ambiguous nucleotides causing end ranges
+                // falling outside of the sequence
                 // https://github.com/lh3/sdust/issues/2
                 // A `N` (or end‐of‐seq) resets the sequence:
                 // 1) flush any pending perfect intervals
-                let mut window_start = if l > self.window_size - 1 {
-                    l - self.window_size + 1
+                let mut window_start = if l > self.options.window_size - 1 {
+                    l - self.options.window_size + 1
                 } else {
                     0
                 };
                 window_start += i + 1 - l;
+
                 while !self.perfect_intervals.is_empty() {
                     window_start += 1;
                     self.save_masked_regions(window_start);
                 }
-
                 // 2) reset the local context
                 l = 0;
                 triplet = 0;
-
                 // 3) clear the sliding window and zero out all counts
                 self.window.clear();
                 self.cw.fill(0);
@@ -139,8 +138,8 @@ impl<'a> SymmetricDust<'a> {
         }
     }
 
-    /// Save all the intervals that are before the `window_start`
-    /// This can only insert one result at a time
+    // Save all the intervals that are before the `window_start`
+    // This can only insert one result at a time
     fn save_masked_regions(&mut self, window_start: usize) {
         if self.perfect_intervals.is_empty() {
             return;
@@ -175,10 +174,11 @@ impl<'a> SymmetricDust<'a> {
         }
     }
 
-    /// Add a triplet to the window, shifting all the data to represent the new window
+    // Add a triplet to the window, shifting all the data to represent the new window
     fn shift_window(&mut self, triplet: usize) {
         let mut s;
-        if self.window.len() >= self.window_size - 2 {
+
+        if self.window.len() >= self.options.window_size - 2 {
             s = self.window.pop_front().unwrap();
             self.cw[s] -= 1;
             self.rw -= self.cw[s];
@@ -197,7 +197,7 @@ impl<'a> SymmetricDust<'a> {
         self.rv += self.cv[triplet];
         self.cv[triplet] += 1;
 
-        if self.cv[triplet] * 10 > 2 * self.score_threshold {
+        if self.cv[triplet] * 10 > 2 * self.options.score_threshold {
             loop {
                 s = self.window[self.window.len() - self.biggest_num_triplets];
                 self.biggest_num_triplets -= 1;
@@ -211,7 +211,7 @@ impl<'a> SymmetricDust<'a> {
         }
     }
 
-    /// Find all the perfect intervals in the window
+    // Find all the perfect intervals in the window
     fn find_perfect(&mut self, window_start: usize) {
         let mut c = self.cv;
         let mut r = self.rv;
@@ -224,7 +224,7 @@ impl<'a> SymmetricDust<'a> {
             c[triplet] += 1;
             let new_score = r;
             let new_l = self.window.len() - i - 1;
-            if new_score * 10 > self.score_threshold * new_l {
+            if new_score * 10 > self.options.score_threshold * new_l {
                 let mut insertion_position = 0;
                 // Figure out where to insert the new interval
                 for (j, interval) in self.perfect_intervals.iter().enumerate() {

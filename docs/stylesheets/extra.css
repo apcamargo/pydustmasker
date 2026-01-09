@@ -1,0 +1,27 @@
+[data-md-color-scheme="slate"] {
+    --md-default-fg-color: hsla(var(--md-hue), 10%, 77.5%, 1);
+    --md-default-bg-color: hsla(var(--md-hue), 15%, 7%, 1);
+    --md-default-bg-color--light: hsla(var(--md-hue), 15%, 7%, 0.54);
+    --md-default-bg-color--lighter: hsla(var(--md-hue), 15%, 7%, 0.26);
+    --md-default-bg-color--lightest: hsla(var(--md-hue), 15%, 7%, 0.07);
+}
+
+/* Increase the main content and navigation font size */
+.md-typeset,
+.md-nav {
+    font-size: 0.79rem;
+}
+
+.md-typeset code {
+    font-size: 0.89em;
+}
+
+.md-typeset table:not([class]) {
+    font-size: 0.7rem;
+}
+
+/* Prevent selection of >>> prompts, ... continuation lines, and output */
+.highlight .gp,
+.highlight .go {
+    user-select: none;
+}
