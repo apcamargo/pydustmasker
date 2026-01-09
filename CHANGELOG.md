@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-01-09
+### Added
+- Added a `LongdustMasker` class implementing the Longdust algorithm for detecting long, low-complexity repeats that are missed by SDUST.
+- Added an internal `_BaseMasker` base class that defines a common interface for both `DustMasker` and `LongdustMasker`. `_BaseMasker` provides the `mask()` method as well as the `__len__`, `__iter__`, and `__getitem__` dunder methods.
+- Added documentation built with Zensical, featuring a quick start guide, an in-depth theoretical description of the SDUST and Longdust algorithms, and a complete API reference.
+
+### Changed
+- The `intervals` attribute now returns an immutable tuple of tuples instead of a list of tuples.
+- The minimum required Python version was increased to 3.10 (dropping support for Python 3.9).
+
 ## [1.0.3] - 2025-07-19
 ### Fix
 - Fix index overflow caused by non-ATCG characters.
