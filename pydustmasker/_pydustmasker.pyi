@@ -63,8 +63,8 @@ class DustMasker(_BaseMasker):
         The length of the window used by symmetric DUST algorithm. The minimum
         allowed value is 4.
     score_threshold : int, default: 20
-        Score threshold for identifying low-complexity regions (10 times the
-        actual threshold value). Higher values result in fewer regions being masked.
+        Score threshold for identifying low-complexity regions. Higher values
+        result in fewer regions being masked.
 
     Attributes
     ----------
@@ -88,13 +88,14 @@ class DustMasker(_BaseMasker):
     Raises
     ------
     ValueError
-       If the input parameters violate the following constraints:
-       * sequence length < 4
-       * window_size < 4
+        If the input parameters violate the following constraints:
+
+        * sequence length < 4
+        * window_size < 4
     TypeError
-       If the input parameters are not of the expected type.
+        If the input parameters are not of the expected type.
     OverflowError
-       If a negative integer is passed to `window_size` or `score_threshold`.
+        If a negative integer is passed to `window_size` or `score_threshold`.
     """
 
     window_size: int
@@ -120,7 +121,8 @@ class LongdustMasker(_BaseMasker):
         Larger windows can detect longer repeats but increase memory usage. For
         optimal performance, keep window_size < 4^kmer.
     score_threshold : float, default: 0.6
-        Score threshold for identifying low-complexity regions.
+        Score threshold for identifying low-complexity regions. Higher values
+        result in fewer regions being masked.
     kmer : int, default: 7
         The k-mer length used by the Longdust algorithm. Must be at least 1.
     gc : float | 'auto' | None, default: None
@@ -187,19 +189,20 @@ class LongdustMasker(_BaseMasker):
     Raises
     ------
     ValueError
-       If the input parameters violate the following constraints:
-       * sequence length < kmer + 1
-       * window_size < kmer + 1
-       * kmer is 0
-       * score_threshold <= 0.0
-       * min_start_cnt < 2
-       * xdrop is 0
-       * gc is invalid (not 'auto', None, or float between 0.0 and 1.0)
+        If the input parameters violate the following constraints:
+
+        * sequence length < kmer + 1
+        * window_size < kmer + 1
+        * kmer is 0
+        * score_threshold <= 0.0
+        * min_start_cnt < 2
+        * xdrop is 0
+        * gc is invalid (not 'auto', None, or float between 0.0 and 1.0)
     TypeError
-       If the input parameters are not of the expected type.
+        If the input parameters are not of the expected type.
     OverflowError
-       If a negative integer is passed to `window_size`, `kmer`, `xdrop`,
-       or `min_start_cnt`.
+        If a negative integer is passed to `window_size`, `kmer`, `xdrop`,
+        or `min_start_cnt`.
     """
 
     window_size: int
