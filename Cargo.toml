@@ -1,14 +1,14 @@
 [package]
 name = "pydustmasker"
 version = "1.0.3"
-description = "Python bindings to DustMasker, a utility to identify and mask low-complexity regions in nucleotide sequences"
 edition = "2021"
-license = "MIT"
+description = "Python bindings to DustMasker, a utility to identify and mask low-complexity regions in nucleotide sequences"
 readme = "README.md"
+license = "MIT"
 
 [lib]
-name = "_pydustmasker"
 crate-type = ["cdylib"]
+name = "_pydustmasker"
 
 [dependencies]
 pyo3 = { version = "0.27.2", features = ["extension-module"] }
