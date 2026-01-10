@@ -8,7 +8,9 @@ authors = [{ name = "Antonio Camargo", email = "antoniop.camargo@gmail.com" }]
 dynamic = ["version"]
 
 [project.urls]
-Home = "https://github.com/apcamargo/pydustmasker"
+homepage = "https://apcamargo.github.io/pydustmasker"
+documentation = "https://apcamargo.github.io/pydustmasker"
+repository = "https://github.com/apcamargo/pydustmasker"
 
 [build-system]
 requires = ["maturin>=1.10,<2.0"]
