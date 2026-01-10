@@ -129,7 +129,7 @@ Intervals = tuple[tuple[int, int], ...]
 
 def process_record(record: SeqRecord) -> tuple[str, Intervals]: # (1)!
     masker = pydustmasker.LongdustMasker(str(record.seq))
-    return record.id, masker.intervals
+    return str(record.id), masker.intervals
 
 
 if __name__ == "__main__":

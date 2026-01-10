@@ -24,7 +24,7 @@ class _BaseMasker:
     """
 
     sequence: str
-    intervals: tuple[tuple[int, int]]
+    intervals: tuple[tuple[int, int], ...]
 
     @property
     def n_masked_bases(self) -> int: ...
