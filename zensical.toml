@@ -75,6 +75,7 @@ features = [
   "content.footnote.tooltips",
   "content.tabs.link",
   "content.tooltips",
+  "navigation.footer",
   "navigation.indexes",
   "navigation.instant",
   "navigation.instant.prefetch",

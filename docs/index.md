@@ -117,22 +117,29 @@ The example below uses [Biopython](https://biopython.org/) to parse a FASTA file
 import multiprocessing.pool
 
 from Bio import SeqIO
+from Bio.SeqRecord import SeqRecord
 
 import pydustmasker
 
-input_file = "sequences.fna"
-output_file = "lc_intervals.tsv"
+INPUT_FILE = "sequences.fna"
+OUTPUT_FILE = "lc_intervals.tsv"
+
+Intervals = tuple[tuple[int, int], ...]
 
 
-def process_record(record):
-    masker = pydustmasker.LongdustMasker(str(record.seq), score_threshold=12)
+def process_record(record: SeqRecord) -> tuple[str, Intervals]: # (1)!
+    masker = pydustmasker.LongdustMasker(str(record.seq))
     return record.id, masker.intervals
 
 
 if __name__ == "__main__":
-    with open(output_file, "w") as f, multiprocessing.pool.Pool() as pool:
-        records = SeqIO.parse(input_file, "fasta")
-        for name, intervals in pool.imap(process_record, records):
+    with open(OUTPUT_FILE, "w") as f, multiprocessing.pool.Pool() as pool: # (2)!
+        records = SeqIO.parse(INPUT_FILE, "fasta")
+        for name, intervals in pool.imap(process_record, records): # (3)!
             for start, end in intervals:
                 f.write(f"{name}\t{start}\t{end}\n")
 ```
+
+1. The `process_record()` function encapsulates the computation performed on a single sequence record. A wrapper like this is necessary because process pools distribute work by invoking a single function for each item.
+2. A process pool is created using `multiprocessing.pool.Pool()`, which automatically manages a set of worker processes. If you are using a free-threaded version of Python, you can also use `multiprocessing.pool.ThreadPool()` to create a pool of threads instead of processes.
+3. `SeqIO.parse()` is used to lazily read sequence records from the input FASTA file, avoiding the need to load all sequences into memory at once. Each record is submitted to the process pool via `pool.imap()`, which returns an iterator that yields results in the order they were submitted.

@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: 3.x
-      - run: pip install zensical mkdocstrings-python
+      - run: pip install zensical==0.0.15 mkdocstrings-python==2.0.1
       - run: zensical build --clean
       - uses: actions/upload-pages-artifact@v4
         with:
