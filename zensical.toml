@@ -50,7 +50,6 @@ custom_checkbox = true
 
 [project.plugins.mkdocstrings.handlers.python]
 inventories = ["https://docs.python.org/3/objects.inv"]
-paths = ["."]
 
 [project.plugins.mkdocstrings.handlers.python.options]
 docstring_style = "numpy"

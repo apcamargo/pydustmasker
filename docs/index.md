@@ -60,7 +60,7 @@ icon: lucide/rocket
 
 ## Usage
 
-To identify and mask low-complexity regions in a nucleotide sequence, create an instance of a masker class and provide your sequence to it. A masker class implements a specific low-complexity detection algorithm and provides methods to retrieve the detected regions and to generate a masked version of the sequence. `pydustmasker` provides two such classes, corresponding to different detection algorithms: [SDUST](theory#sdust) and [Longdust](theory#longdust). The SDUST algorithm is implemented in the [`DustMasker`](api#pydustmasker.DustMasker) class, while the Longdust algorithm is implemented in the [`LongdustMasker`](api#pydustmasker.LongdustMasker) class.
+To identify and mask low-complexity regions in a nucleotide sequence, create an instance of a masker class and provide your sequence to it. A masker class implements a specific low-complexity detection algorithm and provides methods to retrieve the detected regions and to generate a masked version of the sequence. `pydustmasker` provides two such classes, corresponding to different detection algorithms: [SDUST](theory#sdust) and [Longdust](theory#longdust). The SDUST algorithm is implemented in the [`DustMasker`][pydustmasker.DustMasker] class, while the Longdust algorithm is implemented in the [`LongdustMasker`][pydustmasker.LongdustMasker] class.
 
 ```pycon
 >>> import pydustmasker
