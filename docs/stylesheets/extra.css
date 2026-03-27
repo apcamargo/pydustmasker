@@ -6,6 +6,11 @@
     --md-default-bg-color--lightest: hsla(var(--md-hue), 15%, 7%, 0.07);
 }
 
+/* Use monospaced font in the title */
+.md-header__topic:first-child {
+    font-family: var(--md-code-font-family);
+}
+
 /* Increase the main content and navigation font size */
 .md-typeset,
 .md-nav {
