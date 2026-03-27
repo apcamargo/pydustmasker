@@ -9,7 +9,7 @@
 /* Increase the main content and navigation font size */
 .md-typeset,
 .md-nav {
-    font-size: 0.79rem;
+    font-size: 0.77rem;
 }
 
 .md-typeset code {
@@ -17,7 +17,7 @@
 }
 
 .md-typeset table:not([class]) {
-    font-size: 0.7rem;
+    font-size: 0.68rem;
 }
 
 /* Prevent selection of >>> prompts, ... continuation lines, and output */
