@@ -122,6 +122,6 @@ if __name__ == "__main__":
 
 ## References
 
-[^1]: Morgulis, Aleksandr, et al. **A Fast and Symmetric DUST Implementation to Mask Low-Complexity DNA Sequences**. *Journal of Computational Biology*, vol. 13, no. 5, June 2006, pp. 1028–40. <https://doi.org/10.1089/cmb.2006.13.1028>.
+[^1]: Morgulis, Aleksandr, *et al*. **A Fast and Symmetric Dust Implementation to Mask Low-Complexity DNA Sequences**. *Journal of Computational Biology*, vol. 13, no. 5, June 2006, pp. 1028–40. <https://doi.org/10.1089/cmb.2006.13.1028>.
 
-[^2]: Li, Heng, and Brian Li. **Finding Low-Complexity DNA Sequences with Longdust**. *arXiv*, 2025. <https://doi.org/10.48550/arxiv.2509.07357>.
+[^2]: Li, Heng, and Brian Li. **Finding Low-Complexity DNA Sequences with Longdust**. *Bioinformatics*, vol. 42, no. 3, Feb. 2026, p. btag112. <https://doi.org/10.1093/bioinformatics/btag112>.
