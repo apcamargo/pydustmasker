@@ -336,10 +336,9 @@ impl Longdust {
         let mut sw: f64 = 0.0;
 
         let q_size = self.window.len() as i32;
-        let mut l: usize = 1;
 
         // Iterate backwards over the queue
-        for i in (0..q_size).rev() {
+        for (l, i) in (1..).zip((0..q_size).rev()) {
             // SAFETY: i is in range [0, q_size), and q.len() = q_size
             let kmer_val = unsafe { *self.window.get(i as usize).unwrap_unchecked() };
 
@@ -398,7 +397,6 @@ impl Longdust {
                 break;
             }
             last_sl = sl;
-            l += 1;
         }
 
         if max_i < 0 {
@@ -447,9 +445,8 @@ impl Longdust {
         let mut max_i: i32 = -1;
         let mut max_sf: f64 = 0.0;
         let mut s: f64 = 0.0;
-        let mut l: usize = 1;
         let q_len = self.window.len();
-        for i in (i0 as usize)..q_len {
+        for (l, i) in (1..).zip((i0 as usize)..q_len) {
             // SAFETY: i is in range [i0, q_len), verified by loop bounds
             let kmer_val = unsafe { *self.window.get(i).unwrap_unchecked() };
             let score_val = if (kmer_val & 1) == 0 {
@@ -478,7 +475,6 @@ impl Longdust {
             if sl > max_back + 1e-6 {
                 break;
             }
-            l += 1;
         }
         max_i
     }
