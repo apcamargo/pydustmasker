@@ -115,18 +115,18 @@ class LongdustMasker(_BaseMasker):
     Parameters
     ----------
     sequence : str
-        A string representing the nucleotide sequence to be processed. Characters
-        other than 'A', 'C', 'G', 'T', 'a', 'c', 'g', 't' will be considered
-        ambiguous bases. The minimum allowed sequence length is 4 bases.
+        Nucleotide sequence to process. ASCII characters other than 'A', 'C',
+        'G', 'T', 'a', 'c', 'g', and 't' are treated as ambiguous bases. Non-ASCII
+        characters are rejected. Must contain at least `kmer + 1` bases.
     window_size : int, default: 5000
-        Maximum size of the sliding window used to scan for low-complexity regions.
-        Larger windows can detect longer repeats but increase memory usage. For
-        optimal performance, keep window_size < 4^kmer.
+        Maximum sliding-window size. Larger windows can detect longer repeats
+        but use more memory. Must be in the range [`kmer + 1`, 65535].
     score_threshold : float, default: 0.6
         Score threshold for identifying low-complexity regions. Higher values
-        result in fewer regions being masked.
+        result in fewer regions being masked. Must be finite and greater than 0.0.
     kmer : int, default: 7
-        The k-mer length used by the Longdust algorithm. Must be at least 1.
+        The k-mer length used by the Longdust algorithm. Must be in the range
+        [1, 12].
     gc : float | 'auto' | None, default: None
         GC content for bias correction. If None (default), assume a uniform base
         composition. If 'auto', compute GC from the input sequence. If a float
@@ -141,12 +141,8 @@ class LongdustMasker(_BaseMasker):
         higher values allow more permissive extensions and looser boundaries, which
         may include non-low-complexity regions. If set to None, X-drop is disabled.
     min_start_cnt : int, default: 3
-        Minimum k-mer frequency in the window to trigger a backward scan.
-        Only when a k-mer appears at least this many times does the algorithm
-        attempt to identify a low-complexity region starting at that position.
-        Must be at least 2. Lower values are more sensitive but slower, while
-        higher values will result in faster processing but may miss shorter
-        repeats.
+        Minimum k-mer frequency to start a backward scan. Must be in [2, 65535].
+        Lower values are more sensitive but slower.
     approx : bool, default: False
         If True, use approximate mode for guaranteed O(L*w) time complexity.
         In this mode, only the first candidate starting position is examined
@@ -161,7 +157,7 @@ class LongdustMasker(_BaseMasker):
         The nucleotide sequence that was provided as input.
     window_size : int
         The size of the sliding window used to scan for low-complexity regions.
-    score_threshold : int
+    score_threshold : float
         Score threshold for determining low-complexity regions.
     kmer : int
         k-mer length.
@@ -195,17 +191,17 @@ class LongdustMasker(_BaseMasker):
 
         * sequence contains a non-ASCII character
         * sequence length < kmer + 1
-        * window_size < kmer + 1
-        * kmer is 0
-        * score_threshold <= 0.0
+        * window_size is not in [kmer + 1, 65535]
+        * kmer is not in [1, 12]
+        * score_threshold is non-finite or not greater than 0.0
         * min_start_cnt < 2
         * xdrop is 0
         * gc is invalid (not 'auto', None, or float between 0.0 and 1.0)
     TypeError
         If the input parameters are not of the expected type.
     OverflowError
-        If a negative integer is passed to `window_size`, `kmer`, `xdrop`,
-        or `min_start_cnt`.
+        If an integer cannot be represented by its parameter type, including a
+        negative value or `min_start_cnt` above 65535.
     """
 
     window_size: int

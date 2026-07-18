@@ -71,11 +71,11 @@ def test_dustmasker_score_threshold():
 
 
 def test_ambigious():
-    # no ambiguous
+    # No ambiguous
     seq1 = "GCCAGGCTGGCCAAGGAGATCttttttttttttttttttttttttAAGAGACCATGGCATGCACTGGCCAAGGAGATCttttttttttttttttttttttttAAGA"
-    # with ambiguous
+    # With ambiguous
     seq2 = "GCCAGGCTGGCCAAGGAGATTCttttttttttttttttttttttttAAGAGCCARYCTGGCCAAGGAGANTCttttttttttttttttttttttttAAGA"
-    # with ambiguous and masks
+    # With ambiguous and masks
     seq3 = "GCCAGGCTGGCCAAGGAGATTCttttttttttttttttttttttttAFGAGCCAGGCTGGCCAAGGAGANTCtttttttttnNnttttttttAAGA"
     assert DustMasker(seq1, window_size=64).intervals == ((21, 45), (78, 102))
     assert DustMasker(seq2, window_size=64).intervals == ((22, 46), (72, 96))
@@ -132,12 +132,33 @@ def test_longdustmasker_score_threshold():
     assert m2.intervals == ()
 
 
+def test_longdustmasker_validation_score_threshold():
+    for score_threshold in (float("nan"), float("inf"), 0.0, -0.1):
+        with pytest.raises(ValueError, match="invalid score threshold"):
+            LongdustMasker("A" * 8, score_threshold=score_threshold)
+
+
 def test_longdustmasker_kmer():
     seq = "TTTTGCGCACGTGTCGCTTGAATATATTTTTTTTT"
     m1 = LongdustMasker(seq, kmer=7, score_threshold=0.1, window_size=64)
     m2 = LongdustMasker(seq, kmer=3, score_threshold=0.1, window_size=64)
     assert m1.intervals == ((26, 35),)
     assert m2.intervals == ((0, 4), (21, 35))
+
+
+def test_longdustmasker_validation_kmer_range():
+    for kmer in (0, 13):
+        with pytest.raises(ValueError, match="invalid k-mer size"):
+            LongdustMasker("A" * 14, window_size=14, kmer=kmer)
+
+
+def test_longdustmasker_validation_window_size_limit():
+    assert (
+        LongdustMasker("AA", window_size=65535, kmer=1, forward_only=True).intervals
+        == ()
+    )
+    with pytest.raises(ValueError, match="invalid window size"):
+        LongdustMasker("AA", window_size=65536, kmer=1)
 
 
 def test_longdustmasker_xdrop():
@@ -254,8 +275,16 @@ def test_tantanmasker_repeat_units():
     assert TantanMasker("ATTATTATTATTATT").repeat_units() == (("ATT", 0, 15, 5.0),)
 
 
+def test_tantanmasker_repeat_units_max_period_boundaries():
+    # Period 1 is the valid minimum DP state space
+    assert TantanMasker("A" * 20, max_period=1).repeat_units() == (("A", 0, 20, 20.0),)
+    # Period 5 reaches scalar tails, one bulk group, and a bulk-plus-tail group
+    assert TantanMasker("ACGTA" * 6, max_period=5).repeat_units() == (
+        ("ACGTA", 0, 30, 6.0),
+    )
+
+
 def test_tantanmasker_repeat_units_with_ambiguous_letters():
-    # Ambiguous encodings use N or X in consensus units.
     assert TantanMasker("ACGTNACGTNACGTNACGTNACGTNACGTN").repeat_units() == (
         ("ACGTN", 0, 29, 5.8),
     )
@@ -295,14 +324,12 @@ def test_tantanmasker_validation_max_period():
 
 
 def test_tantanmasker_validation_decay_non_normal():
-    # Only normal finite decay values are accepted.
     for bad in (float("nan"), float("inf"), 1e-310, 0.0, -1.0, 1.5):
         with pytest.raises(ValueError, match="invalid decay"):
             TantanMasker("ACACACACACACAC", decay=bad)
 
 
 def test_tantanmasker_repeat_units_gapped():
-    # Gapped Viterbi regression fixtures.
     seq = "ACACACACACACCATCATCATCATCAT"
     m1 = TantanMasker(seq, min_copy_number=0)
     m2 = TantanMasker(seq, gap_open=7, gap_extend=1, min_copy_number=0)

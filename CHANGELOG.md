@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Sequences containing non-ASCII characters are now rejected at construction time with a `ValueError` instead of panicking later in `mask()` or `__repr__()`. This applies to `DustMasker`, `LongdustMasker`, and `TantanMasker`.
+- `LongdustMasker` now rejects `kmer` above 12, `window_size` above 65535, and non-finite `score_threshold`.
 
 ### Changed
 - Raised the minimum Rust version for source builds to 1.85.

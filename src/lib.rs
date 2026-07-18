@@ -16,6 +16,10 @@ use pyo3::{
 use std::sync::OnceLock;
 use thiserror::Error;
 
+const MAX_LONGDUST_KMER: usize = 12;
+const MAX_LONGDUST_WINDOW_SIZE: usize = u16::MAX as usize;
+const MAX_TANTAN_PERIOD: usize = i32::MAX as usize;
+
 #[derive(Error, Debug)]
 pub enum InputError {
     #[error("sequence is too short, must be at least {1} characters long (got {0})")]
@@ -26,9 +30,11 @@ pub enum InputError {
     WindowSizeError(usize, usize),
     #[error("invalid GC content '{0}', must be between 0.0 and 1.0")]
     GcError(f64),
-    #[error("invalid k-mer size '{0}', must be greater than 0")]
-    KmerSizeError(usize),
-    #[error("invalid score threshold '{0}', must be greater than 0.0")]
+    #[error("invalid k-mer size '{0}', must be in the range [1, {1}]")]
+    KmerSizeError(usize, usize),
+    #[error("invalid window size '{0}', must be at most '{1}'")]
+    WindowSizeLimitError(usize, usize),
+    #[error("invalid score threshold '{0}', must be finite and greater than 0.0")]
     LongdustScoreThresholdError(f64),
     #[error("invalid min_start_cnt '{0}', must be at least 2")]
     MinStartCntError(u16),
@@ -90,13 +96,20 @@ impl Validate for SymmetricDustOptions {
 
 impl Validate for LongdustOptions {
     fn validate_inputs(&self, sequence: &str) -> Result<(), InputError> {
+        if !(1..=MAX_LONGDUST_KMER).contains(&self.kmer) {
+            return Err(InputError::KmerSizeError(self.kmer, MAX_LONGDUST_KMER));
+        }
+
         let min_len = self.kmer + 1;
         validate_base_params(sequence, self.window_size, min_len)?;
 
-        if self.kmer == 0 {
-            return Err(InputError::KmerSizeError(self.kmer));
+        if self.window_size > MAX_LONGDUST_WINDOW_SIZE {
+            return Err(InputError::WindowSizeLimitError(
+                self.window_size,
+                MAX_LONGDUST_WINDOW_SIZE,
+            ));
         }
-        if self.score_threshold <= 0.0 {
+        if !self.score_threshold.is_finite() || self.score_threshold <= 0.0 {
             return Err(InputError::LongdustScoreThresholdError(
                 self.score_threshold,
             ));
@@ -117,9 +130,6 @@ impl Validate for LongdustOptions {
         Ok(())
     }
 }
-
-// Largest period representable by `f64::powi` in `repeat_offset_prob`.
-const MAX_PERIOD: usize = i32::MAX as usize;
 
 impl Validate for TantanOptions {
     fn validate_inputs(&self, sequence: &str) -> Result<(), InputError> {
@@ -143,8 +153,11 @@ impl Validate for TantanOptions {
             return Err(InputError::DecayError(self.decay));
         }
         // `repeat_offset_prob` passes this value to `f64::powi`.
-        if self.max_period == 0 || self.max_period > MAX_PERIOD {
-            return Err(InputError::MaxPeriodError(self.max_period, MAX_PERIOD));
+        if self.max_period == 0 || self.max_period > MAX_TANTAN_PERIOD {
+            return Err(InputError::MaxPeriodError(
+                self.max_period,
+                MAX_TANTAN_PERIOD,
+            ));
         }
         if let Some(0) = self.gap_extend {
             return Err(InputError::GapExtendError(0));
@@ -423,18 +436,22 @@ impl DustMasker {
 /// Parameters
 /// ----------
 /// sequence : str
-///     A string representing the nucleotide sequence to be processed. Characters
-///     other than 'A', 'C', 'G', 'T', 'a', 'c', 'g', 't' will be considered
-///     ambiguous bases. The minimum allowed sequence length is 4 bases.
+///     Nucleotide sequence to process. ASCII characters other than 'A', 'C',
+///     'G', 'T', 'a', 'c', 'g', and 't' are treated as ambiguous bases. Non-ASCII
+///     characters are rejected. Must contain at least `kmer + 1` bases.
 /// window_size : int, default: 5000
-///     Maximum size of the sliding window used to scan for low-complexity regions.
-///     Larger windows can detect longer repeats but increase memory usage. For
-///     optimal performance, keep window_size < 4^kmer.
+///     Maximum sliding-window size. Larger windows can detect longer repeats but use
+///     more memory. Must be in the range [`kmer + 1`, 65535].
 /// score_threshold : float, default: 0.6
 ///     Score threshold for identifying low-complexity regions. Higher values
-///     result in fewer regions being masked.
+///     result in fewer regions being masked. Must be finite and greater than 0.0.
 /// kmer : int, default: 7
-///     The k-mer length used by the Longdust algorithm. Must be at least 1.
+///     The k-mer length used by the Longdust algorithm. Must be in the range
+///     [1, 12].
+/// gc : float | 'auto' | None, default: None
+///     GC content for bias correction. If None (default), assume a uniform base
+///     composition. If 'auto', compute GC from the input sequence. If a float
+///     between 0.0 and 1.0, use that value.
 /// xdrop : int | None, default: 50
 ///     Maximum allowable score drop for X-drop extension termination. During
 ///     backward scanning, extension continues as long as (max_score - current_score)
@@ -445,21 +462,13 @@ impl DustMasker {
 ///     higher values allow more permissive extensions and looser boundaries, which
 ///     may include non-low-complexity regions. If set to None, X-drop is disabled.
 /// min_start_cnt : int, default: 3
-///     Minimum k-mer frequency in the window to trigger a backward scan.
-///     Only when a k-mer appears at least this many times does the algorithm
-///     attempt to identify a low-complexity region starting at that position.
-///     Must be at least 2. Lower values are more sensitive but slower, while
-///     higher values will result in faster processing but may miss shorter
-///     repeats.
+///     Minimum k-mer frequency to start a backward scan. Must be in [2, 65535].
+///     Lower values are more sensitive but slower.
 /// approx : bool, default: False
 ///     If True, use approximate mode for guaranteed O(L*w) time complexity.
 ///     In this mode, only the first candidate starting position is examined
 ///     during backward scanning, rather than checking all candidates to find
 ///     the optimal one.
-/// gc : float | 'auto' | None, default: None
-///     GC content for bias correction. If None (default), assume a uniform base
-///     composition. If 'auto', compute GC from the input sequence. If a float
-///     between 0.0 and 1.0, use that value.
 /// forward_only : bool, default: False
 ///     If True, only process the forward strand. By default, both strands are processed.
 ///
@@ -469,7 +478,7 @@ impl DustMasker {
 ///     The nucleotide sequence that was provided as input.
 /// window_size : int
 ///     The size of the sliding window used to scan for low-complexity regions.
-/// score_threshold : int
+/// score_threshold : float
 ///     Score threshold for determining low-complexity regions.
 /// kmer : int
 ///     k-mer length.
@@ -500,19 +509,20 @@ impl DustMasker {
 /// ------
 /// ValueError
 ///    If the input parameters violate the following constraints:
+///
 ///    * sequence contains a non-ASCII character
 ///    * sequence length < kmer + 1
-///    * window_size < kmer + 1
-///    * kmer is 0
-///    * score_threshold <= 0.0
+///    * window_size is not in [kmer + 1, 65535]
+///    * kmer is not in [1, 12]
+///    * score_threshold is non-finite or not greater than 0.0
 ///    * min_start_cnt < 2
 ///    * xdrop is 0
 ///    * gc is invalid (not 'auto', None, or float between 0.0 and 1.0)
 /// TypeError
 ///    If the input parameters are not of the expected type.
 /// OverflowError
-///    If a negative integer is passed to `window_size`, `kmer`, `xdrop`,
-///    or `min_start_cnt`.
+///    If an integer cannot be represented by its parameter type, including a
+///    negative value or `min_start_cnt` above 65535.
 #[pyclass(extends=BaseMasker)]
 struct LongdustMasker {
     #[pyo3(get)]
