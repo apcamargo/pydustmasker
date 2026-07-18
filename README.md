@@ -1,6 +1,6 @@
 # pydustmasker
 
-`pydustmasker` is a Python library that enables efficient detection and masking of low-complexity regions in nucleotide sequences using the SDUST[^1] and Longdust[^2] algorithms.
+`pydustmasker` provides a unified Python interface to the SDUST[^1], Longdust[^2], and tantan[^3] algorithms for detecting and masking low-complexity regions and tandem repeats in nucleotide and protein sequences.
 
 ## Documentation
 
@@ -27,7 +27,10 @@ pixi add pydustmasker
 
 ## Usage
 
-To identify and mask low-complexity regions in a nucleotide sequence, create an instance of a masker class and provide your sequence to it. A masker class implements a specific low-complexity detection algorithm and provides methods to retrieve the detected regions and to generate a masked version of the sequence. `pydustmasker` provides two such classes, corresponding to different detection algorithms: [SDUST](https://apcamargo.github.io/pydustmasker/theory#sdust) and [Longdust](https://apcamargo.github.io/pydustmasker/theory#longdust). The SDUST algorithm is implemented in the [`DustMasker`](https://apcamargo.github.io/pydustmasker/api#pydustmasker.DustMasker) class, while the Longdust algorithm is implemented in the [`LongdustMasker`](https://apcamargo.github.io/pydustmasker/api#pydustmasker.LongdustMasker) class.
+To identify and mask low-complexity regions in a nucleotide sequence, create an instance of a masker class and provide your sequence to it. A masker class implements a specific low-complexity detection algorithm and provides methods to retrieve the detected regions and to generate a masked version of the sequence. `pydustmasker` provides three such classes, corresponding to different detection algorithms: [SDUST](https://apcamargo.github.io/pydustmasker/theory#sdust), [Longdust](https://apcamargo.github.io/pydustmasker/theory#longdust), and [tantan](https://apcamargo.github.io/pydustmasker/theory#tantan). These algorithms are implemented in three different classes:
+- [`DustMasker`](https://apcamargo.github.io/pydustmasker/api#pydustmasker.DustMasker)
+- [`LongdustMasker`](https://apcamargo.github.io/pydustmasker/api#pydustmasker.LongdustMasker)
+- [`TantanMasker`](https://apcamargo.github.io/pydustmasker/api#pydustmasker.TantanMasker)
 
 ```py
 >>> import pydustmasker
@@ -49,6 +52,8 @@ To identify and mask low-complexity regions in a nucleotide sequence, create an 
 23-30: GGGGGGG
 ```
 
+### Masking low-complexity regions
+
 You can generate a masked version of the sequence using the `mask()` method. By default, low-complexity regions are soft-masked by converting bases to lowercase. Setting the `hard` parameter to `True` enables hard-masking, in which affected bases are replaced with the ambiguous nucleotide `N`.
 
 ```py
@@ -60,7 +65,9 @@ You can generate a masked version of the sequence using the `mask()` method. By 
 'CGTATATATATAGTATGCGTACTNNNNNNNCT'
 ```
 
-The identification of low-complexity regions can be tuned via algorithm-specific parameters. Both `DustMasker` and `LongdustMasker` provide multiple options, documented in the [API reference](https://apcamargo.github.io/pydustmasker/api), that control how low-complexity regions are determined. One shared parameter is `score_threshold`, which controls detection stringency: lowering this threshold results in more regions being classified as low-complexity, whereas increasing it restricts detection to the most clearly low-complexity regions.
+### Tuning the detection of low-complexity regions
+
+The identification of low-complexity regions can be tuned via algorithm-specific parameters. All of the provided masker classes provide multiple parameters, documented in the [API reference](https://apcamargo.github.io/pydustmasker/api), that enable control how low-complexity regions are determined. One shared parameter is `score_threshold`, which controls detection stringency: lowering this threshold results in more regions being classified as low-complexity, whereas increasing it restricts detection to the most clearly low-complexity regions.
 
 ```py
 # Setting `score_threshold` to 10 results in more low-complexity regions being detected
@@ -71,6 +78,31 @@ The identification of low-complexity regions can be tuned via algorithm-specific
 ((2, 12), (23, 30))
 >>> masker.mask()
 'CGtatatatataGTATGCGTACTgggggggCT'
+```
+
+### Identifying tandem repeats in protein sequences
+
+Although the SDUST and Longdust are specifically designed for nucleotide sequences, the tantan algorithm can also be used to identify tandem repeats in proteins. The `TantanMasker` class provides a `protein` parameter that enables this functionality.
+
+```py
+# Example protein sequence with an imperfect tandem repeat
+>>> protein = "QAEMSTNPKPMSTNPKPMSTDPKPMSTNPKPMSTNPKPDEH"
+# Set protein=True to identify tandem repeats in a protein sequence
+>>> masker = pydustmasker.TantanMasker(protein, protein=True)
+# Get the intervals of the tandem repeats identified in the sequence
+>>> masker.intervals
+((9, 38),)
+# Generate a soft-masked sequence
+>>> masker.mask(hard=True)
+'QAEMSTNPKXXXXXXXXXXXXXXXXXXXXXXXXXXXXXDEH'
+```
+
+In addition to masking, `TantanMasker` can determine tandem repeat units through the `repeat_units()` method.
+
+```py
+# Each repeat unit is represented by a (unit, start, end, copy_number) tuple
+>>> masker.repeat_units()
+(('MSTNPKP', 3, 38, 5.0),)
 ```
 
 ## Processing sequences in parallel
@@ -125,3 +157,5 @@ if __name__ == "__main__":
 [^1]: Morgulis, Aleksandr, *et al*. **A Fast and Symmetric Dust Implementation to Mask Low-Complexity DNA Sequences**. *Journal of Computational Biology*, vol. 13, no. 5, June 2006, pp. 1028–40. <https://doi.org/10.1089/cmb.2006.13.1028>.
 
 [^2]: Li, Heng, and Brian Li. **Finding Low-Complexity DNA Sequences with Longdust**. *Bioinformatics*, vol. 42, no. 3, Feb. 2026, p. btag112. <https://doi.org/10.1093/bioinformatics/btag112>.
+
+[^3]: Frith, Martin C. **A New Repeat-Masking Method Enables Specific Detection of Homologous Sequences**. *Nucleic Acids Research*, vol. 39, no. 4, Mar. 2011, pp. e23–e23. <https://doi.org/10.1093/nar/gkq1212>.

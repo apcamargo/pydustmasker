@@ -1,6 +1,6 @@
 [project]
 name = "pydustmasker"
-description = "Python bindings to DustMasker, a utility to identify and mask low-complexity regions in nucleotide sequences"
+description = "Python bindings algorithmss for identifying and masking low-complexity regions in nucleotide and protein sequences"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -8,8 +8,8 @@ authors = [{ name = "Antonio Camargo", email = "antoniop.camargo@gmail.com" }]
 dynamic = ["version"]
 
 [project.urls]
-homepage = "https://apcamargo.github.io/pydustmasker"
 documentation = "https://apcamargo.github.io/pydustmasker"
+homepage = "https://apcamargo.github.io/pydustmasker"
 repository = "https://github.com/apcamargo/pydustmasker"
 
 [build-system]

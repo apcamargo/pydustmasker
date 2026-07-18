@@ -1,3 +1,10 @@
+/// The alphabet a sequence is encoded and scored against.
+#[derive(Debug, Clone, Copy)]
+pub enum Alphabet {
+    Dna,
+    Protein,
+}
+
 /// Lookup to encode ASCII DNA letters into 0..4
 /// A -> 0, C -> 1, G -> 2, T -> 3, others -> 4
 pub const ENCODING_LOOKUP: [u8; 256] = {
@@ -35,6 +42,54 @@ pub fn reverse_complement_encoded_sequence(encoded_seq: &[u8]) -> Vec<u8> {
             x => x,
         })
         .collect()
+}
+
+/// Lookup to encode ASCII protein letters, in the order
+/// ACDEFGHIKLMNPQRSTVWY -> 0..20, everything else -> 20 (ambiguous)
+const PROTEIN_ENCODING_LOOKUP: [u8; 256] = {
+    let mut lookup = [20; 256];
+    let letters = b"ACDEFGHIKLMNPQRSTVWY";
+    let mut i = 0;
+    while i < letters.len() {
+        lookup[letters[i] as usize] = i as u8;
+        lookup[letters[i].to_ascii_lowercase() as usize] = i as u8;
+        i += 1;
+    }
+    lookup
+};
+
+/// Encode ASCII protein sequence into numeric values using the protein
+/// alphabet (ACDEFGHIKLMNPQRSTVWY -> 0..20, others -> 20).
+fn encode_protein_sequence(sequence: &[u8]) -> Vec<u8> {
+    sequence
+        .iter()
+        .map(|&b| PROTEIN_ENCODING_LOOKUP[b as usize])
+        .collect()
+}
+
+/// Encode an ASCII sequence using the given alphabet's lookup table.
+pub fn encode_with_alphabet(sequence: &[u8], alphabet: Alphabet) -> Vec<u8> {
+    match alphabet {
+        Alphabet::Dna => encode_sequence(sequence),
+        Alphabet::Protein => encode_protein_sequence(sequence),
+    }
+}
+
+/// Inverse tables for decoding a consensus repeat unit. The trailing entry is
+/// the ambiguous bucket ('N' for DNA, 'X' for protein) both encoders fall back
+/// to, since a repeat unit may span an ambiguous letter.
+const DNA_DECODING: [u8; 5] = *b"ACGTN";
+const PROTEIN_DECODING: [u8; 21] = *b"ACDEFGHIKLMNPQRSTVWYX";
+
+/// Decode an encoded consensus unit back into letters. Every value the two
+/// encoders can produce (0..=4 for DNA, 0..=20 for protein) has an entry, so
+/// the result is always ASCII.
+pub fn decode_sequence(encoded: &[u8], alphabet: Alphabet) -> String {
+    let table: &[u8] = match alphabet {
+        Alphabet::Dna => &DNA_DECODING,
+        Alphabet::Protein => &PROTEIN_DECODING,
+    };
+    encoded.iter().map(|&b| table[b as usize] as char).collect()
 }
 
 // Compute GC content from an encoded sequence.

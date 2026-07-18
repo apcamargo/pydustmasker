@@ -74,8 +74,7 @@ impl SymmetricDust {
         let encoded_seq = encode_sequence(sequence);
         obj.inner_process(&encoded_seq);
 
-        // The algorithm can sometimes give end ranges outside of the sequence
-        // https://github.com/lh3/sdust/issues/2
+        // Clamp reported interval ends to the input length.
         obj.results
             .into_iter()
             .map(|r| (r.start, r.end.min(sequence.len())))
@@ -88,7 +87,7 @@ impl SymmetricDust {
         let mut triplet: u8 = 0;
         let mut l: usize = 0;
 
-        // The chain ensures the loop executes one last time with '4' (non-ACGT) for cleanup
+        // Append an ambiguous sentinel to flush state at end-of-seq.
         for (i, &b) in encoded_seq.iter().chain([4].iter()).enumerate() {
             // A/T/C/G
             if b < 4 {
@@ -108,11 +107,7 @@ impl SymmetricDust {
                     }
                 }
             } else {
-                // Suggested fix for Ambiguous nucleotides causing end ranges
-                // falling outside of the sequence
-                // https://github.com/lh3/sdust/issues/2
-                // A `N` (or end‐of‐seq) resets the sequence:
-                // 1) flush any pending perfect intervals
+                // An ambiguous base or end-of-seq flushes intervals and resets state.
                 let mut window_start = if l > self.options.window_size - 1 {
                     l - self.options.window_size + 1
                 } else {
@@ -124,10 +119,8 @@ impl SymmetricDust {
                     window_start += 1;
                     self.save_masked_regions(window_start);
                 }
-                // 2) reset the local context
                 l = 0;
                 triplet = 0;
-                // 3) clear the sliding window and zero out all counts
                 self.window.clear();
                 self.cw.fill(0);
                 self.cv.fill(0);

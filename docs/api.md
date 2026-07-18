@@ -7,3 +7,5 @@ icon: lucide/code
 ::: pydustmasker.DustMasker
 
 ::: pydustmasker.LongdustMasker
+
+::: pydustmasker.TantanMasker

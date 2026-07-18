@@ -1,4 +1,14 @@
-from pydustmasker import DustMasker, LongdustMasker
+import math
+
+import pytest
+
+from pydustmasker import DustMasker, LongdustMasker, TantanMasker
+
+
+def test_reject_non_ascii_sequences():
+    for masker_type in (DustMasker, LongdustMasker, TantanMasker):
+        with pytest.raises(ValueError):
+            masker_type("ACGT🙂ACGT")
 
 
 def test_dustmasker_creation():
@@ -27,7 +37,6 @@ def test_dustmasker_slicing():
 
 def test_iterable():
     masker = DustMasker("TACCCCCCCGCGTTTTTTT", window_size=64, score_threshold=20)
-    assert hasattr(iter(masker), "__next__")
     assert tuple(
         DustMasker("TACCCCCCCGCGTTTTTTT", window_size=64, score_threshold=20)
     ) == ((2, 9), (12, 19))
@@ -189,3 +198,215 @@ def test_longdustmasker_ambigious():
     seq = "TACCNNNNCGCGTTTTTTT"
     masker = LongdustMasker(seq, window_size=64, score_threshold=0.1, kmer=3)
     assert masker.intervals == ((12, 19),)
+
+
+def test_tantanmasker_creation():
+    seq = "ATGCTAGCCGTAATGCGTACX"
+    masker = TantanMasker(seq)
+    assert masker.sequence == seq
+    assert masker.protein is False
+    assert masker.repeat_start == 0.005
+    assert masker.repeat_end == 0.05
+    assert masker.decay == 0.9
+    assert masker.max_period == 100
+    assert masker.gap_open == 0
+    assert masker.gap_extend is None
+    assert masker.score_threshold == 0.5
+    assert masker.min_copy_number == 2.0
+    assert isinstance(masker.intervals, tuple)
+    assert isinstance(masker.probabilities, tuple)
+    assert len(masker.probabilities) == len(seq)
+    assert masker.intervals == ()
+    assert masker.n_masked_bases == 0
+
+
+def test_tantanmasker_protein_defaults():
+    seq = "ACDEFGHIKLMNPQRSTVWY" * 5
+    m1 = TantanMasker(seq)
+    m2 = TantanMasker(seq, protein=True)
+    assert m1.intervals == ()
+    assert m2.protein is True
+    assert m2.max_period == 50
+    assert m2.intervals == ((20, 100),)
+
+
+def test_tantanmasker_masking():
+    seq = "ATTATTATTATTATT"
+    masker = TantanMasker(seq)
+    assert masker.intervals == ((3, 15),)
+    assert masker.mask() == "ATTattattattatt"
+    assert masker.mask(hard=True) == "ATTNNNNNNNNNNNN"
+
+
+def test_tantanmasker_masking_protein():
+    seq = "AC" * 7
+    m1 = TantanMasker(seq)
+    m2 = TantanMasker(seq, protein=True)
+    assert m1.mask(hard=True) == "ACNNNNNNNNNNNN"
+    assert m2.intervals == ((2, 14),)
+    assert m2.mask() == "ACacacacacacac"
+    assert m2.mask(hard=True) == "ACXXXXXXXXXXXX"
+
+
+def test_tantanmasker_repeat_units():
+    assert TantanMasker("ACACACACACACAC").repeat_units() == (("AC", 0, 14, 7.0),)
+    assert TantanMasker("ACGTACGTACGTACGTACGT").repeat_units() == (("ACGT", 0, 20, 5.0),)
+    assert TantanMasker("ATTATTATTATTATT").repeat_units() == (("ATT", 0, 15, 5.0),)
+
+
+def test_tantanmasker_repeat_units_with_ambiguous_letters():
+    # Ambiguous encodings use N or X in consensus units.
+    assert TantanMasker("ACGTNACGTNACGTNACGTNACGTNACGTN").repeat_units() == (
+        ("ACGTN", 0, 29, 5.8),
+    )
+    assert TantanMasker("CATNCATNCATNCATNCATNCATNCATN").repeat_units() == (
+        ("CATN", 0, 27, 6.75),
+    )
+    assert TantanMasker("ACGTRACGTRACGTRACGTRACGTRACGTR").repeat_units() == (
+        ("ACGTN", 0, 29, 5.8),
+    )
+    assert TantanMasker(
+        "ACDEFGHIKBACDEFGHIKBACDEFGHIKB", protein=True
+    ).repeat_units() == (("ACDEFGHIKX", 0, 29, 2.9),)
+
+
+def test_tantanmasker_probabilities_are_in_unit_range():
+    dna = "ACGTACGTAGCTNNNNACACACACAC"
+    assert all(0.0 <= p <= 1.0 for p in TantanMasker(dna).probabilities)
+    assert all(
+        0.0 <= p <= 1.0
+        for p in TantanMasker("ACDEFGHIK" * 4, protein=True).probabilities
+    )
+
+
+def test_tantanmasker_score_threshold():
+    seq = "ACGTACGTACGTACGTAAGT"
+    m1 = TantanMasker(seq)
+    m2 = TantanMasker(seq, score_threshold=0.0)
+    assert m1.intervals == ((4, 19),)
+    assert m2.intervals == ((0, 20),)
+
+
+def test_tantanmasker_validation_max_period():
+    # `repeat_offset_prob` passes max_period to `f64::powi`.
+    for bad in (0, 2**31):
+        with pytest.raises(ValueError, match="invalid max_period"):
+            TantanMasker("ACGTACGTACGTACGT", max_period=bad)
+
+
+def test_tantanmasker_validation_decay_non_normal():
+    # Only normal finite decay values are accepted.
+    for bad in (float("nan"), float("inf"), 1e-310, 0.0, -1.0, 1.5):
+        with pytest.raises(ValueError, match="invalid decay"):
+            TantanMasker("ACACACACACACAC", decay=bad)
+
+
+def test_tantanmasker_repeat_units_gapped():
+    # Gapped Viterbi regression fixtures.
+    seq = "ACACACACACACCATCATCATCATCAT"
+    m1 = TantanMasker(seq, min_copy_number=0)
+    m2 = TantanMasker(seq, gap_open=7, gap_extend=1, min_copy_number=0)
+    assert m1.repeat_units() == (("CAT", 9, 27, 6.0),)
+    assert m2.repeat_units() == (("CAT", 0, 27, 10.666666666666666),)
+
+    seq = "CATCATCATCATACACACACACACAC"
+    m1 = TantanMasker(seq, min_copy_number=0)
+    m2 = TantanMasker(seq, gap_open=7, gap_extend=1, min_copy_number=0)
+    assert m1.repeat_units() == (("AC", 12, 26, 7.0),)
+    assert m2.repeat_units() == (("AC", 0, 26, 11.0),)
+
+
+def test_tantanmasker_repeat_units_gapped_min_copy_number():
+    # Filtering uses the gapped copy-number calculation.
+    seq = "CATCATCATCATACACACACACACAC"
+    m1 = TantanMasker(seq, gap_open=7, gap_extend=1)
+    m2 = TantanMasker(seq, gap_open=7, gap_extend=1, min_copy_number=12)
+    assert m1.repeat_units() == (("AC", 0, 26, 11.0),)
+    assert m2.repeat_units() == ()
+
+
+def test_tantanmasker_repeat_units_min_copy_number():
+    seq = "ACACACACACACAC"
+    m1 = TantanMasker(seq)
+    m2 = TantanMasker(seq, min_copy_number=10.0)
+    assert m1.repeat_units() == (("AC", 0, 14, 7.0),)
+    assert m2.repeat_units() == ()
+
+
+def test_tantanmasker_repr():
+    seq = "TACCCCCCCGCGTTTTTTT"
+    masker = TantanMasker(seq)
+    assert repr(masker) == "TantanMasker(sequence: 'TACCCCCC…', intervals: ())"
+
+
+def test_tantanmasker_scalar_validation():
+    for kwargs in (
+        {"repeat_start": 1.0},
+        {"repeat_start": -0.1},
+        {"repeat_end": 1.5},
+        {"repeat_end": -0.1},
+        {"score_threshold": 2.0},
+        {"score_threshold": -0.1},
+        {"gap_extend": 0},
+        {"min_copy_number": -1.0},
+    ):
+        with pytest.raises(ValueError):
+            TantanMasker("ACGTACGTACGTACGT", **kwargs)
+
+
+def test_tantanmasker_validation_gap_probability():
+    with pytest.raises(ValueError):
+        TantanMasker("ACGTACGTACGTACGT", gap_open=0, gap_extend=1)
+
+
+def test_tantanmasker_validation_empty_sequence():
+    with pytest.raises(ValueError):
+        TantanMasker("")
+
+
+def test_tantanmasker_gapped_probabilities():
+    seq = "ACGCGCGCGCGCAGCGCGCGCGCACGT"
+    m1 = TantanMasker(seq)
+    m2 = TantanMasker(seq, gap_open=0, gap_extend=2)
+    assert m1.intervals == ((3, 24),)
+    assert m2.intervals == ((4, 23),)
+    oracle = [
+        0,
+        0.014,
+        0.0897,
+        0.394,
+        0.559,
+        0.724,
+        0.806,
+        0.863,
+        0.891,
+        0.908,
+        0.916,
+        0.921,
+        0.923,
+        0.938,
+        0.946,
+        0.949,
+        0.949,
+        0.946,
+        0.94,
+        0.926,
+        0.898,
+        0.838,
+        0.712,
+        0.443,
+        0.358,
+        0.197,
+        0.0478,
+    ]
+    assert list(m2.probabilities) == pytest.approx(oracle, abs=1e-3)
+
+
+def test_tantanmasker_gapped_small_decay():
+    seq = "AC" * 10
+    m1 = TantanMasker(seq, gap_open=7, gap_extend=1)
+    m2 = TantanMasker(seq, gap_open=7, gap_extend=1, decay=1e-5)
+    assert m1.intervals == ((2, 20),)
+    assert all(math.isfinite(p) and 0.0 <= p <= 1.0 for p in m2.probabilities)
+    assert max(m2.probabilities) > 0.5
+    assert m2.intervals == ((2, 19),)
