@@ -748,22 +748,56 @@ impl<'a> ViterbiHmm<'a> {
         let max_offset = max_offset_in_sequence(pos, self.max_period);
         let log_row = self.log_odds.row(seq[pos]);
         let to_background = self.f2b + old[0];
-        let mut to_foreground = f64::NEG_INFINITY;
+        let mut to_foreground0 = f64::NEG_INFINITY;
+        let mut to_foreground1 = f64::NEG_INFINITY;
+        let mut to_foreground2 = f64::NEG_INFINITY;
+        let mut to_foreground3 = f64::NEG_INFINITY;
 
         // Index `i` is period `i + 1`, whose letter sits `i + 1` places before
-        // `pos`. Binding the three rows as equal-length slices up front keeps
-        // the per-period bounds checks out of the loop.
+        // `pos`. Binding the equal-length slices up front makes the matching
+        // bounds and offset convention explicit.
         let letters = &seq[pos - max_offset..pos];
         let old_repeat = &old[1..=max_offset];
         let new_repeat = &mut new[1..=max_offset];
         let b2f_scores = &self.b2f_scores[..max_offset];
         let f2f0 = self.f2f0;
 
-        for i in 0..max_offset {
+        // Four independent maxima shorten the reduction dependency chain. The
+        // aggregate score is unchanged; traceback chooses the period separately.
+        let bulk_end = max_offset - max_offset % 4;
+        let mut i = 0;
+        while i < bulk_end {
+            let letter = letters[max_offset - 1 - i];
+            let f = old_repeat[i] + log_row[letter as usize];
+            to_foreground0 = to_foreground0.max(f + b2f_scores[i]);
+            new_repeat[i] = to_background.max(f2f0 + f);
+
+            let letter = letters[max_offset - 2 - i];
+            let f = old_repeat[i + 1] + log_row[letter as usize];
+            to_foreground1 = to_foreground1.max(f + b2f_scores[i + 1]);
+            new_repeat[i + 1] = to_background.max(f2f0 + f);
+
+            let letter = letters[max_offset - 3 - i];
+            let f = old_repeat[i + 2] + log_row[letter as usize];
+            to_foreground2 = to_foreground2.max(f + b2f_scores[i + 2]);
+            new_repeat[i + 2] = to_background.max(f2f0 + f);
+
+            let letter = letters[max_offset - 4 - i];
+            let f = old_repeat[i + 3] + log_row[letter as usize];
+            to_foreground3 = to_foreground3.max(f + b2f_scores[i + 3]);
+            new_repeat[i + 3] = to_background.max(f2f0 + f);
+            i += 4;
+        }
+        let mut to_foreground = to_foreground0
+            .max(to_foreground1)
+            .max(to_foreground2)
+            .max(to_foreground3);
+        while i < max_offset {
             let letter = letters[max_offset - 1 - i];
             let f = old_repeat[i] + log_row[letter as usize];
             to_foreground = to_foreground.max(f + b2f_scores[i]);
             new_repeat[i] = to_background.max(f2f0 + f);
+            i += 1;
         }
         new[(max_offset + 1)..=self.max_period].fill(to_background);
         new[0] = (self.b2b + old[0]).max(to_foreground);

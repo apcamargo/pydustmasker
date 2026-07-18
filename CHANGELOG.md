@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Raised the minimum Rust version for source builds to 1.85.
+- Improved gap-free `repeat_units()` Viterbi decoding performance by processing four repeat periods at a time.
 
 ## [2.0.0] - 2026-01-09
 ### Added
