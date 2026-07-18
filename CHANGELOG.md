@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- During SDUST's interval selection process, avoid repeatedly scanning candidate intervals that have already been considered.
+
 ## [3.0.0] - 2026-07-18
 ### Added
 - Added `TantanMasker`, which implements the tantan algorithm for detecting tandem repeats in nucleotide and protein sequences. It shares the `_BaseMasker` masking interface used by `DustMasker` and `LongdustMasker`, and additionally exposes per-position repeat posterior probabilities through `probabilities` and consensus repeat units through `repeat_units()`.

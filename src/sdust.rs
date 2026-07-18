@@ -210,6 +210,7 @@ impl SymmetricDust {
         let mut r = self.rv;
         let mut max_score = 0;
         let mut max_l = 0;
+        let mut insertion_position = 0;
 
         for i in (0..=self.window.len() - self.biggest_num_triplets - 1).rev() {
             let triplet = self.window[i];
@@ -218,17 +219,16 @@ impl SymmetricDust {
             let new_score = r;
             let new_l = self.window.len() - i - 1;
             if new_score * 10 > self.options.score_threshold * new_l {
-                let mut insertion_position = 0;
                 // Figure out where to insert the new interval
-                for (j, interval) in self.perfect_intervals.iter().enumerate() {
+                while let Some(interval) = self.perfect_intervals.get(insertion_position) {
                     if interval.start < i + window_start {
                         break;
                     }
-                    insertion_position = j + 1;
                     if max_score == 0 || interval.score * max_l > max_score * interval.l {
                         max_score = interval.score;
                         max_l = interval.l;
                     }
+                    insertion_position += 1;
                 }
 
                 // And insert it
@@ -244,6 +244,7 @@ impl SymmetricDust {
                     };
 
                     self.perfect_intervals.insert(insertion_position, new_perf);
+                    insertion_position += 1;
                 }
             }
         }
