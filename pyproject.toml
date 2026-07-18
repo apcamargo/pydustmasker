@@ -1,6 +1,6 @@
 [project]
 name = "pydustmasker"
-description = "Python bindings algorithmss for identifying and masking low-complexity regions in nucleotide and protein sequences"
+description = "Python bindings algorithms for identifying and masking low-complexity regions in nucleotide and protein sequences"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

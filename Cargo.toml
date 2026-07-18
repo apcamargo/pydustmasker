@@ -1,9 +1,9 @@
 [package]
 name = "pydustmasker"
-version = "2.0.0"
+version = "3.0.0"
 edition = "2021"
 rust-version = "1.85"
-description = "Python bindings algorithmss for identifying and masking low-complexity regions in nucleotide and protein sequences"
+description = "Python bindings algorithms for identifying and masking low-complexity regions in nucleotide and protein sequences"
 readme = "README.md"
 license = "MIT"
 

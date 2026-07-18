@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [3.0.0] - 2026-07-18
 ### Added
 - Added `TantanMasker`, which implements the tantan algorithm for detecting tandem repeats in nucleotide and protein sequences. It shares the `_BaseMasker` masking interface used by `DustMasker` and `LongdustMasker`, and additionally exposes per-position repeat posterior probabilities through `probabilities` and consensus repeat units through `repeat_units()`.
 
