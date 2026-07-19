@@ -367,18 +367,23 @@ def test_tantanmasker_repr():
 
 
 def test_tantanmasker_scalar_validation():
-    for kwargs in (
-        {"repeat_start": 1.0},
-        {"repeat_start": -0.1},
-        {"repeat_end": 1.5},
-        {"repeat_end": -0.1},
-        {"score_threshold": 2.0},
-        {"score_threshold": -0.1},
-        {"gap_extend": 0},
-        {"min_copy_number": -1.0},
-    ):
+    for repeat_start in (1.0, -0.1):
         with pytest.raises(ValueError):
-            TantanMasker("ACGTACGTACGTACGT", **kwargs)
+            TantanMasker("ACGTACGTACGTACGT", repeat_start=repeat_start)
+
+    for repeat_end in (1.5, -0.1):
+        with pytest.raises(ValueError):
+            TantanMasker("ACGTACGTACGTACGT", repeat_end=repeat_end)
+
+    for score_threshold in (2.0, -0.1):
+        with pytest.raises(ValueError):
+            TantanMasker("ACGTACGTACGTACGT", score_threshold=score_threshold)
+
+    with pytest.raises(ValueError):
+        TantanMasker("ACGTACGTACGTACGT", gap_extend=0)
+
+    with pytest.raises(ValueError):
+        TantanMasker("ACGTACGTACGTACGT", min_copy_number=-1.0)
 
 
 def test_tantanmasker_validation_gap_probability():
