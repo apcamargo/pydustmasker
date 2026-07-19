@@ -13,5 +13,5 @@ name = "_pydustmasker"
 
 [dependencies]
 fearless_simd = "0.6.0"
-pyo3 = { version = "0.27.2", features = ["extension-module"] }
-thiserror = "2.0.12"
+pyo3 = { version = "0.29.0", features = ["extension-module"] }
+thiserror = "2.0.19"

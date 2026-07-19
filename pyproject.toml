@@ -13,7 +13,7 @@ homepage = "https://apcamargo.github.io/pydustmasker"
 repository = "https://github.com/apcamargo/pydustmasker"
 
 [build-system]
-requires = ["maturin>=1.10,<2.0"]
+requires = ["maturin>=1.14,<2.0"]
 build-backend = "maturin"
 
 [tool.coverage.run]

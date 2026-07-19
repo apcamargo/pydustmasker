@@ -2,5 +2,5 @@ pyrefly==1.1.1
 pytest==9.0.2
 pytest-cov==7.0.0
 ruff==0.14.9
-maturin==1.10.2
+maturin==1.14.1
 -e .

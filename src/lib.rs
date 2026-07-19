@@ -409,24 +409,22 @@ impl DustMasker {
         sequence: String,
         window_size: usize,
         score_threshold: usize,
-    ) -> PyResult<(DustMasker, BaseMasker)> {
+    ) -> PyResult<PyClassInitializer<Self>> {
         let options = SymmetricDustOptions {
             window_size,
             score_threshold,
         };
         options.validate_inputs(&sequence)?;
         let intervals = SymmetricDust::process(sequence.as_bytes(), options);
-        Ok((
-            DustMasker {
-                window_size,
-                score_threshold,
-            },
-            BaseMasker {
-                sequence,
-                intervals,
-                mask_symbol: b'N',
-            },
-        ))
+        Ok(PyClassInitializer::from(BaseMasker {
+            sequence,
+            intervals,
+            mask_symbol: b'N',
+        })
+        .add_subclass(Self {
+            window_size,
+            score_threshold,
+        }))
     }
 }
 
@@ -567,7 +565,7 @@ impl LongdustMasker {
         min_start_cnt: u16,
         approx: bool,
         forward_only: bool,
-    ) -> PyResult<(LongdustMasker, BaseMasker)> {
+    ) -> PyResult<PyClassInitializer<Self>> {
         let gc_config = parse_gc_config(gc)?;
         let options = LongdustOptions {
             window_size,
@@ -584,23 +582,21 @@ impl LongdustMasker {
 
         let intervals = Longdust::process(sequence.as_bytes(), options);
 
-        Ok((
-            LongdustMasker {
-                window_size,
-                score_threshold,
-                kmer,
-                gc: gc_config,
-                xdrop,
-                min_start_cnt,
-                approx,
-                forward_only,
-            },
-            BaseMasker {
-                sequence,
-                intervals,
-                mask_symbol: b'N',
-            },
-        ))
+        Ok(PyClassInitializer::from(BaseMasker {
+            sequence,
+            intervals,
+            mask_symbol: b'N',
+        })
+        .add_subclass(Self {
+            window_size,
+            score_threshold,
+            kmer,
+            gc: gc_config,
+            xdrop,
+            min_start_cnt,
+            approx,
+            forward_only,
+        }))
     }
 
     /// Option used for GC bias correction. Can be None (a uniform base composition
@@ -764,7 +760,7 @@ impl TantanMasker {
         gap_extend: Option<u32>,
         score_threshold: f64,
         min_copy_number: f64,
-    ) -> PyResult<(TantanMasker, BaseMasker)> {
+    ) -> PyResult<PyClassInitializer<Self>> {
         let max_period = max_period.unwrap_or(if protein { 50 } else { 100 });
         let alphabet = if protein {
             Alphabet::Protein
@@ -787,21 +783,19 @@ impl TantanMasker {
         let probabilities = Tantan::probabilities(sequence.as_bytes(), options);
         let intervals = probabilities_to_intervals(&probabilities, options.score_threshold);
 
-        Ok((
-            TantanMasker {
-                options,
-                probabilities,
-                repeat_units: OnceLock::new(),
+        Ok(PyClassInitializer::from(BaseMasker {
+            sequence,
+            intervals,
+            mask_symbol: match alphabet {
+                Alphabet::Dna => b'N',
+                Alphabet::Protein => b'X',
             },
-            BaseMasker {
-                sequence,
-                intervals,
-                mask_symbol: match alphabet {
-                    Alphabet::Dna => b'N',
-                    Alphabet::Protein => b'X',
-                },
-            },
-        ))
+        })
+        .add_subclass(Self {
+            options,
+            probabilities,
+            repeat_units: OnceLock::new(),
+        }))
     }
 
     /// Whether the sequence was interpreted as protein.
