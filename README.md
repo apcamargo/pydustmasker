@@ -86,7 +86,7 @@ Although the SDUST and Longdust are specifically designed for nucleotide sequenc
 
 ```py
 # Example protein sequence with an imperfect tandem repeat
->>> protein = "QAEMSTNPKPMSTNPKPMSTDPKPMSTNPKPMSTNPKPDEH"
+>>> protein = "QAEMSTNPKPMSTNPKPMSTDPKPMSTNPKPMSTNPKPMSTNDEH"
 # Set protein=True to identify tandem repeats in a protein sequence
 >>> masker = pydustmasker.TantanMasker(protein, protein=True)
 # Get the intervals of the tandem repeats identified in the sequence
@@ -94,7 +94,7 @@ Although the SDUST and Longdust are specifically designed for nucleotide sequenc
 ((9, 38),)
 # Generate a soft-masked sequence
 >>> masker.mask(hard=True)
-'QAEMSTNPKXXXXXXXXXXXXXXXXXXXXXXXXXXXXXDEH'
+'QAEMSTNPKXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXEH'
 ```
 
 In addition to masking, `TantanMasker` can determine tandem repeat units through the `repeat_units()` method.
@@ -102,7 +102,7 @@ In addition to masking, `TantanMasker` can determine tandem repeat units through
 ```py
 # Each repeat unit is represented by a (unit, start, end, copy_number) tuple
 >>> masker.repeat_units()
-(('MSTNPKP', 3, 38, 5.0),)
+(('MSTNPKP', 3, 42, 5.571428571428571),)
 ```
 
 ## Processing sequences in parallel

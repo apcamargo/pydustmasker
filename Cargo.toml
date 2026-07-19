@@ -2,7 +2,7 @@
 name = "pydustmasker"
 version = "3.0.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.89"
 description = "Python bindings algorithms for identifying and masking low-complexity regions in nucleotide and protein sequences"
 readme = "README.md"
 license = "MIT"
@@ -12,5 +12,6 @@ crate-type = ["cdylib"]
 name = "_pydustmasker"
 
 [dependencies]
+fearless_simd = "0.6.0"
 pyo3 = { version = "0.27.2", features = ["extension-module"] }
 thiserror = "2.0.12"

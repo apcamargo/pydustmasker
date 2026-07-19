@@ -1,9 +1,13 @@
 use crate::common::{encode_with_alphabet, Alphabet};
+use fearless_simd::{dispatch, prelude::*, Level, Simd};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
 const DNA_SIZE: usize = 4;
 const PROTEIN_SIZE: usize = 20;
+// Power-of-two rows cover the 21-symbol expanded alphabet and keep masked
+// SIMD lookups in bounds.
+const MATRIX_STRIDE: usize = (PROTEIN_SIZE + 1).next_power_of_two();
 
 // Match/mismatch matrix for A, C, G, T (match +1, mismatch -1), indexed by the
 // encoded letter (0..4).
@@ -169,17 +173,19 @@ fn calculate_lambda(matrix: &[Vec<f64>]) -> f64 {
     }
 }
 
-// A flat square scoring matrix with one row per encoded letter.
 struct Matrix {
-    stride: usize,
-    values: Vec<f64>,
+    values: Vec<[f64; MATRIX_STRIDE]>,
 }
 
 impl Matrix {
-    // The scoring row for `letter`, to be indexed by a second encoded letter.
-    fn row(&self, letter: u8) -> &[f64] {
-        let start = letter as usize * self.stride;
-        &self.values[start..start + self.stride]
+    #[inline(always)]
+    fn row(&self, letter: u8) -> &[f64; MATRIX_STRIDE] {
+        &self.values[letter as usize]
+    }
+
+    #[inline(always)]
+    fn lookup(row: &[f64; MATRIX_STRIDE], letter: u8) -> f64 {
+        row[(letter as usize) & (MATRIX_STRIDE - 1)]
     }
 }
 
@@ -210,8 +216,11 @@ fn tables(alphabet: Alphabet) -> &'static Tables {
         Tables {
             lambda,
             likelihood: Matrix {
-                stride: log_odds.stride,
-                values: log_odds.values.iter().copied().map(f64::exp).collect(),
+                values: log_odds
+                    .values
+                    .iter()
+                    .map(|row| row.map(f64::exp))
+                    .collect(),
             },
             log_odds,
         }
@@ -227,22 +236,22 @@ fn to_f64_rows<const N: usize>(matrix: &[[i32; N]; N]) -> Vec<Vec<f64>> {
         .collect()
 }
 
-// Builds the (size+1) x (size+1) matrix for these raw scores: the last
-// row/column is an "ambiguous letter" bucket, filled with `transform` applied
-// to the lowest score in the matrix, so an ambiguous letter scores no better
-// than the worst real pairing. For DNA that worst pairing is an ordinary
-// mismatch (-1), so ambiguous bases are penalized but not excluded.
+// Adds an ambiguous row and pads columns with its worst transformed score.
 fn expand_matrix(scores: &[Vec<f64>], transform: impl Fn(f64) -> f64) -> Matrix {
     let size = scores.len();
-    let stride = size + 1;
     let min_score = scores.iter().flatten().copied().fold(f64::MAX, f64::min);
+    let ambiguous = transform(min_score);
 
-    let mut values = Vec::with_capacity(stride * stride);
+    let mut values = Vec::with_capacity(size + 1);
     for row in scores {
-        values.extend(row.iter().chain(&[min_score]).map(|&s| transform(s)));
+        let mut expanded = [ambiguous; MATRIX_STRIDE];
+        for (&score, destination) in row.iter().zip(&mut expanded) {
+            *destination = transform(score);
+        }
+        values.push(expanded);
     }
-    values.extend(std::iter::repeat_n(transform(min_score), stride));
-    Matrix { stride, values }
+    values.push([ambiguous; MATRIX_STRIDE]);
+    Matrix { values }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -325,6 +334,17 @@ const SCALE_STEP_SIZE: usize = 16;
 // `max_period`, until the start of the sequence cuts it short.
 fn max_offset_in_sequence(pos: usize, max_period: usize) -> usize {
     pos.min(max_period)
+}
+
+fn simd_level() -> Level {
+    static LEVEL: OnceLock<Level> = OnceLock::new();
+    *LEVEL.get_or_init(Level::new)
+}
+
+// Round before subtracting so exact-zero posteriors remain exactly zero.
+#[inline(always)]
+fn repeat_posterior(forward_background: f32, backward_background: f64, total: f64) -> f32 {
+    (1.0 - (forward_background as f64 * backward_background / total) as f32).clamp(0.0, 1.0)
 }
 
 // Transition probabilities shared by both decoders (the Viterbi decoder takes
@@ -518,7 +538,7 @@ impl<'a> TantanHmm<'a> {
 
         for i in 0..max_offset {
             let letter = letters[max_offset - 1 - i];
-            foreground[i] *= lr_row[letter as usize];
+            foreground[i] *= Matrix::lookup(lr_row, letter);
         }
         // Periods reaching back past the start of the sequence have no
         // emission to contribute.
@@ -546,7 +566,7 @@ impl<'a> TantanHmm<'a> {
             let f = foreground[i];
             from_foreground += f;
             let letter = letters[max_offset - 1 - i];
-            foreground[i] = (b * b2f_probs[i] + f * f2f0) * lr_row[letter as usize];
+            foreground[i] = (b * b2f_probs[i] + f * f2f0) * Matrix::lookup(lr_row, letter);
         }
         self.background_prob = b * self.b2b + from_foreground * self.f2b;
     }
@@ -570,7 +590,7 @@ impl<'a> TantanHmm<'a> {
         let mut to_foreground = 0.0;
         for i in 0..max_offset {
             let letter = letters[max_offset - 1 - i];
-            let f = foreground[i] * lr_row[letter as usize];
+            let f = foreground[i] * Matrix::lookup(lr_row, letter);
             to_foreground += b2f_probs[i] * f;
             foreground[i] = to_background + f2f0 * f;
         }
@@ -602,10 +622,8 @@ impl<'a> TantanHmm<'a> {
         }
     }
 
-    // Forward pass stores the background probability into the output buffer,
-    // then a backward pass computes `1 - (forward_bg[t] * backward_bg[t] / Z)`
-    // in place (standard forward-backward posterior decoding).
-    fn calc_repeat_probs(&mut self, sequence: &[u8]) -> Vec<f32> {
+    // Store forward backgrounds, then replace them with repeat posteriors.
+    fn calc_repeat_probs_scalar(&mut self, sequence: &[u8]) -> Vec<f32> {
         let seq_len = sequence.len();
         let mut probs = vec![0.0f32; seq_len];
 
@@ -619,19 +637,137 @@ impl<'a> TantanHmm<'a> {
 
         self.initialize_backward();
         for pos in (0..seq_len).rev() {
-            let non_repeat = probs[pos] as f64 * self.background_prob / z;
-            // Round to f32 before subtracting: at a true-zero posterior (e.g.
-            // position 0, with no offset to look back to) `non_repeat` sits a
-            // few ulps off 1.0, and rounding first lands the result on exactly
-            // 0.0 rather than ~1e-16. The clamp guards the other side, where the
-            // same ulps would dip below zero and a `score_threshold` of 0.0
-            // would miss the position.
-            probs[pos] = (1.0 - non_repeat as f32).clamp(0.0, 1.0);
+            probs[pos] = repeat_posterior(probs[pos], self.background_prob, z);
             self.rescale_backward(pos);
             self.calc_emission_and_backward_transition(sequence, pos);
         }
 
         probs
+    }
+
+    fn calc_repeat_probs(&mut self, sequence: &[u8]) -> Vec<f32> {
+        let level = simd_level();
+        if self.has_gaps || level.is_fallback() {
+            return self.calc_repeat_probs_scalar(sequence);
+        }
+        dispatch!(level, simd => self.calc_repeat_probs_simd(simd, sequence))
+    }
+
+    #[inline(always)]
+    fn calc_repeat_probs_simd<S: Simd>(&mut self, simd: S, sequence: &[u8]) -> Vec<f32> {
+        let seq_len = sequence.len();
+        let mut probs = vec![0.0f32; seq_len];
+
+        for (pos, slot) in probs.iter_mut().enumerate() {
+            self.calc_forward_transition_and_emission_simd(simd, sequence, pos);
+            self.rescale_forward(pos);
+            *slot = self.background_prob as f32;
+        }
+
+        let z = self.forward_total();
+
+        self.initialize_backward();
+        for pos in (0..seq_len).rev() {
+            probs[pos] = repeat_posterior(probs[pos], self.background_prob, z);
+            self.rescale_backward(pos);
+            self.calc_emission_and_backward_transition_simd(simd, sequence, pos);
+        }
+
+        probs
+    }
+
+    #[inline(always)]
+    fn calc_forward_transition_and_emission_simd<S: Simd>(
+        &mut self,
+        simd: S,
+        sequence: &[u8],
+        pos: usize,
+    ) {
+        let b = self.background_prob;
+        let f2f0 = self.f2f0;
+        let lr_row = self.likelihood.row(sequence[pos]);
+        let max_offset = max_offset_in_sequence(pos, self.max_period);
+        let lanes = S::f64s::N;
+        let bulk_end = max_offset - max_offset % lanes;
+
+        let letters = &sequence[pos - max_offset..pos];
+        let foreground = &mut self.foreground_probs[..max_offset];
+        let b2f_probs = &self.b2f_probs[..max_offset];
+
+        let b_vector = S::f64s::splat(simd, b);
+        let f2f0_vector = S::f64s::splat(simd, f2f0);
+        let mut from_foreground_vector = S::f64s::splat(simd, 0.0);
+
+        let mut i = 0;
+        while i < bulk_end {
+            let foreground_vector = S::f64s::from_slice(simd, &foreground[i..i + lanes]);
+            let b2f_vector = S::f64s::from_slice(simd, &b2f_probs[i..i + lanes]);
+            let likelihood_vector = S::f64s::from_fn(simd, |lane| {
+                Matrix::lookup(lr_row, letters[max_offset - 1 - (i + lane)])
+            });
+            from_foreground_vector += foreground_vector;
+            let output =
+                (b_vector * b2f_vector + foreground_vector * f2f0_vector) * likelihood_vector;
+            output.store_slice(&mut foreground[i..i + lanes]);
+            i += lanes;
+        }
+
+        let mut from_foreground: f64 = from_foreground_vector.as_slice().iter().sum();
+        while i < max_offset {
+            let f = foreground[i];
+            from_foreground += f;
+            let letter = letters[max_offset - 1 - i];
+            foreground[i] = (b * b2f_probs[i] + f * f2f0) * Matrix::lookup(lr_row, letter);
+            i += 1;
+        }
+        self.background_prob = b * self.b2b + from_foreground * self.f2b;
+    }
+
+    #[inline(always)]
+    fn calc_emission_and_backward_transition_simd<S: Simd>(
+        &mut self,
+        simd: S,
+        sequence: &[u8],
+        pos: usize,
+    ) {
+        let to_background = self.f2b * self.background_prob;
+        let f2f0 = self.f2f0;
+        let lr_row = self.likelihood.row(sequence[pos]);
+        let max_offset = max_offset_in_sequence(pos, self.max_period);
+        let lanes = S::f64s::N;
+        let bulk_end = max_offset - max_offset % lanes;
+
+        let letters = &sequence[pos - max_offset..pos];
+        let foreground = &mut self.foreground_probs[..max_offset];
+        let b2f_probs = &self.b2f_probs[..max_offset];
+
+        let to_background_vector = S::f64s::splat(simd, to_background);
+        let f2f0_vector = S::f64s::splat(simd, f2f0);
+        let mut to_foreground_vector = S::f64s::splat(simd, 0.0);
+
+        let mut i = 0;
+        while i < bulk_end {
+            let likelihood_vector = S::f64s::from_fn(simd, |lane| {
+                Matrix::lookup(lr_row, letters[max_offset - 1 - (i + lane)])
+            });
+            let emitted_foreground =
+                S::f64s::from_slice(simd, &foreground[i..i + lanes]) * likelihood_vector;
+            let b2f_vector = S::f64s::from_slice(simd, &b2f_probs[i..i + lanes]);
+            to_foreground_vector += b2f_vector * emitted_foreground;
+            let output = to_background_vector + f2f0_vector * emitted_foreground;
+            output.store_slice(&mut foreground[i..i + lanes]);
+            i += lanes;
+        }
+
+        let mut to_foreground: f64 = to_foreground_vector.as_slice().iter().sum();
+        while i < max_offset {
+            let letter = letters[max_offset - 1 - i];
+            let f = foreground[i] * Matrix::lookup(lr_row, letter);
+            to_foreground += b2f_probs[i] * f;
+            foreground[i] = to_background + f2f0 * f;
+            i += 1;
+        }
+        self.background_prob = self.b2b * self.background_prob + to_foreground;
     }
 }
 
@@ -768,22 +904,22 @@ impl<'a> ViterbiHmm<'a> {
         let mut i = 0;
         while i < bulk_end {
             let letter = letters[max_offset - 1 - i];
-            let f = old_repeat[i] + log_row[letter as usize];
+            let f = old_repeat[i] + Matrix::lookup(log_row, letter);
             to_foreground0 = to_foreground0.max(f + b2f_scores[i]);
             new_repeat[i] = to_background.max(f2f0 + f);
 
             let letter = letters[max_offset - 2 - i];
-            let f = old_repeat[i + 1] + log_row[letter as usize];
+            let f = old_repeat[i + 1] + Matrix::lookup(log_row, letter);
             to_foreground1 = to_foreground1.max(f + b2f_scores[i + 1]);
             new_repeat[i + 1] = to_background.max(f2f0 + f);
 
             let letter = letters[max_offset - 3 - i];
-            let f = old_repeat[i + 2] + log_row[letter as usize];
+            let f = old_repeat[i + 2] + Matrix::lookup(log_row, letter);
             to_foreground2 = to_foreground2.max(f + b2f_scores[i + 2]);
             new_repeat[i + 2] = to_background.max(f2f0 + f);
 
             let letter = letters[max_offset - 4 - i];
-            let f = old_repeat[i + 3] + log_row[letter as usize];
+            let f = old_repeat[i + 3] + Matrix::lookup(log_row, letter);
             to_foreground3 = to_foreground3.max(f + b2f_scores[i + 3]);
             new_repeat[i + 3] = to_background.max(f2f0 + f);
             i += 4;
@@ -794,7 +930,58 @@ impl<'a> ViterbiHmm<'a> {
             .max(to_foreground3);
         while i < max_offset {
             let letter = letters[max_offset - 1 - i];
-            let f = old_repeat[i] + log_row[letter as usize];
+            let f = old_repeat[i] + Matrix::lookup(log_row, letter);
+            to_foreground = to_foreground.max(f + b2f_scores[i]);
+            new_repeat[i] = to_background.max(f2f0 + f);
+            i += 1;
+        }
+        new[(max_offset + 1)..=self.max_period].fill(to_background);
+        new[0] = (self.b2b + old[0]).max(to_foreground);
+    }
+
+    #[inline(always)]
+    fn calc_scores_no_gaps_simd<S: Simd>(
+        &self,
+        simd: S,
+        old: &[f64],
+        new: &mut [f64],
+        seq: &[u8],
+        pos: usize,
+    ) {
+        let max_offset = max_offset_in_sequence(pos, self.max_period);
+        let log_row = self.log_odds.row(seq[pos]);
+        let to_background = self.f2b + old[0];
+        let lanes = S::f64s::N;
+        let bulk_end = max_offset - max_offset % lanes;
+
+        let letters = &seq[pos - max_offset..pos];
+        let old_repeat = &old[1..=max_offset];
+        let new_repeat = &mut new[1..=max_offset];
+        let b2f_scores = &self.b2f_scores[..max_offset];
+        let f2f0 = self.f2f0;
+
+        let mut to_foreground_vector = S::f64s::splat(simd, f64::NEG_INFINITY);
+        let mut i = 0;
+        while i < bulk_end {
+            let log_odds_vector = S::f64s::from_fn(simd, |lane| {
+                Matrix::lookup(log_row, letters[max_offset - 1 - (i + lane)])
+            });
+            let f = S::f64s::from_slice(simd, &old_repeat[i..i + lanes]) + log_odds_vector;
+            let b2f_vector = S::f64s::from_slice(simd, &b2f_scores[i..i + lanes]);
+            to_foreground_vector = to_foreground_vector.max(f + b2f_vector);
+            let output = (f + f2f0).max(to_background);
+            output.store_slice(&mut new_repeat[i..i + lanes]);
+            i += lanes;
+        }
+
+        let mut to_foreground = to_foreground_vector
+            .as_slice()
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        while i < max_offset {
+            let letter = letters[max_offset - 1 - i];
+            let f = old_repeat[i] + Matrix::lookup(log_row, letter);
             to_foreground = to_foreground.max(f + b2f_scores[i]);
             new_repeat[i] = to_background.max(f2f0 + f);
             i += 1;
@@ -811,7 +998,7 @@ impl<'a> ViterbiHmm<'a> {
 
         // Repeat(i) score-with-emission, for i = 1..max_offset.
         for i in 1..=max_offset {
-            new[i] = old[i] + log_row[seq[pos - i] as usize];
+            new[i] = old[i] + Matrix::lookup(log_row, seq[pos - i]);
         }
         // Periods beyond what the sequence supports have no valid emission.
         new[(max_offset + 1)..=mp].fill(f64::NEG_INFINITY);
@@ -899,8 +1086,9 @@ impl<'a> ViterbiHmm<'a> {
         // range at pos == 0) leaves the result as Background.
         let mut best: Option<(usize, f64)> = None;
         for period in 1..=max_offset {
-            let score =
-                next[period] + log_row[seq[pos - period] as usize] + self.b2f_scores[period - 1];
+            let score = next[period]
+                + Matrix::lookup(log_row, seq[pos - period])
+                + self.b2f_scores[period - 1];
             if score > f64::NEG_INFINITY && best.is_none_or(|(_, b)| score > b) {
                 best = Some((period, score));
             }
@@ -921,7 +1109,7 @@ impl<'a> ViterbiHmm<'a> {
         pos: usize,
     ) -> ViterbiState {
         let log_row = self.log_odds.row(seq[pos]);
-        let f = |p: usize| next[p] + log_row[seq[pos - p] as usize];
+        let f = |p: usize| next[p] + Matrix::lookup(log_row, seq[pos - p]);
 
         if period == 1 {
             if self.f2f1 + f(1) < max_score {
@@ -956,7 +1144,7 @@ impl<'a> ViterbiHmm<'a> {
         pos: usize,
     ) -> ViterbiState {
         let log_row = self.log_odds.row(seq[pos]);
-        let f = |p: usize| next[p] + log_row[seq[pos - p] as usize];
+        let f = |p: usize| next[p] + Matrix::lookup(log_row, seq[pos - p]);
 
         let mut best_period = 1;
         // `running` accumulates `g2g` on each step and is overwritten whenever
@@ -997,6 +1185,34 @@ fn compute_checkpoints(hmm: &ViterbiHmm, seq: &[u8], block_size: usize) -> Vec<f
     checkpoints
 }
 
+#[inline(always)]
+fn compute_checkpoints_simd<S: Simd>(
+    simd: S,
+    hmm: &ViterbiHmm,
+    seq: &[u8],
+    block_size: usize,
+) -> Vec<f64> {
+    let n = seq.len();
+    let col_len = hmm.column_len();
+    let num_blocks = n.div_ceil(block_size);
+    let mut checkpoints = vec![0.0; (num_blocks + 1) * col_len];
+
+    let last = num_blocks * col_len;
+    hmm.initialize_backward(&mut checkpoints[last..last + col_len]);
+
+    let mut cur = checkpoints[last..last + col_len].to_vec();
+    let mut prev = vec![0.0; col_len];
+    for pos in (0..n).rev() {
+        hmm.calc_scores_no_gaps_simd(simd, &cur, &mut prev, seq, pos);
+        std::mem::swap(&mut cur, &mut prev);
+        if pos % block_size == 0 {
+            let off = (pos / block_size) * col_len;
+            checkpoints[off..off + col_len].copy_from_slice(&cur);
+        }
+    }
+    checkpoints
+}
+
 // Recomputes one block at a time, then traces it forward.
 fn traceback(
     hmm: &ViterbiHmm,
@@ -1023,6 +1239,52 @@ fn traceback(
             let ci = pos - lo;
             let (before, after) = columns.split_at_mut((ci + 1) * col_len);
             hmm.calc_scores(
+                &after[..col_len],
+                &mut before[ci * col_len..(ci + 1) * col_len],
+                seq,
+                pos,
+            );
+        }
+
+        for pos in lo..hi {
+            let ci = pos - lo;
+            let current = &columns[ci * col_len..(ci + 1) * col_len];
+            let next = &columns[(ci + 1) * col_len..(ci + 2) * col_len];
+            let new_state = hmm.next_state(state, current, next, seq, pos);
+            accumulator.push(state, new_state, pos, seq);
+            state = new_state;
+        }
+    }
+    accumulator.finish(state, seq.len(), seq)
+}
+
+#[inline(always)]
+fn traceback_simd<S: Simd>(
+    simd: S,
+    hmm: &ViterbiHmm,
+    seq: &[u8],
+    checkpoints: &[f64],
+    block_size: usize,
+) -> Vec<RepeatTract> {
+    let mut state = ViterbiState::Background;
+    let mut accumulator = TractAccumulator::new(hmm.max_period);
+
+    let col_len = hmm.column_len();
+    let mut columns = vec![0.0; (block_size + 1) * col_len];
+    let num_blocks = checkpoints.len() / col_len - 1;
+
+    for block_idx in 0..num_blocks {
+        let lo = block_idx * block_size;
+        let hi = ((block_idx + 1) * block_size).min(seq.len());
+
+        let boundary = (block_idx + 1) * col_len;
+        let seed = (hi - lo) * col_len;
+        columns[seed..seed + col_len].copy_from_slice(&checkpoints[boundary..boundary + col_len]);
+        for pos in (lo..hi).rev() {
+            let ci = pos - lo;
+            let (before, after) = columns.split_at_mut((ci + 1) * col_len);
+            hmm.calc_scores_no_gaps_simd(
+                simd,
                 &after[..col_len],
                 &mut before[ci * col_len..(ci + 1) * col_len],
                 seq,
@@ -1205,8 +1467,16 @@ impl Tantan {
             self.other_gap_prob,
         );
         let block_size = (encoded.len() as f64).sqrt().ceil().max(1.0) as usize;
-        let checkpoints = compute_checkpoints(&hmm, &encoded, block_size);
-        let mut tracts = traceback(&hmm, &encoded, &checkpoints, block_size);
+        let level = simd_level();
+        let mut tracts = if hmm.has_gaps || level.is_fallback() {
+            let checkpoints = compute_checkpoints(&hmm, &encoded, block_size);
+            traceback(&hmm, &encoded, &checkpoints, block_size)
+        } else {
+            dispatch!(level, simd => {
+                let checkpoints = compute_checkpoints_simd(simd, &hmm, &encoded, block_size);
+                traceback_simd(simd, &hmm, &encoded, &checkpoints, block_size)
+            })
+        };
         tracts.retain(|t| t.copy_number >= self.options.min_copy_number);
         tracts
     }

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - During SDUST's interval selection process, avoid repeatedly scanning candidate intervals that have already been considered.
+- Accelerated ungapped tantan forward-backward and Viterbi decoding with runtime-dispatched SIMD on supported CPUs, while retaining scalar fallback support for the remaining targets.
+- Raised the minimum Rust version for source builds to 1.89.
 
 ## [3.0.0] - 2026-07-18
 ### Added
