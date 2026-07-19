@@ -43,7 +43,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 89
-target-version = "py39"
+target-version = "py310"
 fix = true
 
 [tool.ruff.lint]
@@ -57,6 +57,7 @@ select = [
   "T201",  # print found
   "T203",  # pprint found
 ]
+extend-select = ["I"]  # isort
 ignore = [
   # Recommended ignores by ruff when using formatter
   "E501",

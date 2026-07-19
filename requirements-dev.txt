@@ -1,6 +1,6 @@
-pyrefly==1.1.1
-pytest==9.0.2
-pytest-cov==7.0.0
-ruff==0.14.9
 maturin==1.14.1
+pyrefly==1.1.1
+pytest-cov==7.1.0
+pytest==9.1.1
+ruff==0.15.22
 -e .
