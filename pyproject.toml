@@ -30,13 +30,8 @@ exclude_lines = [
 features = ["pyo3/extension-module"]
 module-name = "pydustmasker._pydustmasker"
 
-[tool.mypy]
-check_untyped_defs = true
-disallow_untyped_defs = true
-
-[[tool.mypy.overrides]]
-module = ["tests.*"]
-disallow_untyped_defs = false
+[tool.pyrefly]
+preset = "strict"
 
 [tool.pytest]
 addopts = [

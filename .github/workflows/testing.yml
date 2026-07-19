@@ -54,8 +54,8 @@ jobs:
         run: ruff format pydustmasker tests --check
       - name: Lint with ruff
         run: ruff check .
-      - name: mypy check
-        run: mypy .
+      - name: pyrefly check
+        run: pyrefly check .
   testing:
     strategy:
       fail-fast: false
