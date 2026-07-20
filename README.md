@@ -27,10 +27,7 @@ pixi add pydustmasker
 
 ## Usage
 
-To identify and mask low-complexity regions in a nucleotide sequence, create an instance of a masker class and provide your sequence to it. A masker class implements a specific low-complexity detection algorithm and provides methods to retrieve the detected regions and to generate a masked version of the sequence. `pydustmasker` provides three such classes, corresponding to different detection algorithms: [SDUST](https://apcamargo.github.io/pydustmasker/theory#sdust), [Longdust](https://apcamargo.github.io/pydustmasker/theory#longdust), and [tantan](https://apcamargo.github.io/pydustmasker/theory#tantan). These algorithms are implemented in three different classes:
-- [`DustMasker`](https://apcamargo.github.io/pydustmasker/api#pydustmasker.DustMasker)
-- [`LongdustMasker`](https://apcamargo.github.io/pydustmasker/api#pydustmasker.LongdustMasker)
-- [`TantanMasker`](https://apcamargo.github.io/pydustmasker/api#pydustmasker.TantanMasker)
+To identify and mask low-complexity regions in a nucleotide sequence, create an instance of a masker class and provide your sequence to it. A masker class implements a specific low-complexity detection algorithm and provides methods to retrieve the detected regions and to generate a masked version of the sequence. `pydustmasker` provides three such classes, corresponding to different detection algorithms: [SDUST](https://apcamargo.github.io/pydustmasker/theory#sdust), [Longdust](https://apcamargo.github.io/pydustmasker/theory#longdust), and [tantan](https://apcamargo.github.io/pydustmasker/theory#tantan). These algorithms are implemented in three different classes: [`DustMasker`](https://apcamargo.github.io/pydustmasker/api#pydustmasker.DustMasker), [`LongdustMasker`](https://apcamargo.github.io/pydustmasker/api#pydustmasker.LongdustMasker), and [`TantanMasker`](https://apcamargo.github.io/pydustmasker/api#pydustmasker.TantanMasker).
 
 ```py
 >>> import pydustmasker
@@ -82,26 +79,30 @@ The identification of low-complexity regions can be tuned via algorithm-specific
 
 ### Identifying tandem repeats in protein sequences
 
-Although the SDUST and Longdust are specifically designed for nucleotide sequences, the tantan algorithm can also be used to identify tandem repeats in proteins. The `TantanMasker` class provides a `protein` parameter that enables this functionality.
+Although the SDUST and Longdust are specifically designed for nucleotide sequences, tandem repeats in proteins can be identified using the tantan algorithm via the `TantanMasker` class.
 
 ```py
 # Example protein sequence with an imperfect tandem repeat
->>> protein = "QAEMSTNPKPMSTNPKPMSTDPKPMSTNPKPMSTNPKPMSTNDEH"
+>>> prot_seq = "QAEMSTNPKPMSTNPKPMSTDPKPMSTNPKPMSTNPKPMSTNDEH"
 # Set protein=True to identify tandem repeats in a protein sequence
->>> masker = pydustmasker.TantanMasker(protein, protein=True)
+>>> masker = pydustmasker.TantanMasker(prot_seq, protein=True)
 # Get the intervals of the tandem repeats identified in the sequence
 >>> masker.intervals
 ((9, 38),)
-# Generate a soft-masked sequence
+# Hard-mask the tandem repeats in the sequence with 'X' characters
 >>> masker.mask(hard=True)
 'QAEMSTNPKXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXEH'
 ```
 
 In addition to masking, `TantanMasker` can determine tandem repeat units through the `repeat_units()` method.
+Pass `period` to select candidates with a specific repeat period from the same
+decoded repeat tracts.
 
 ```py
 # Each repeat unit is represented by a (unit, start, end, copy_number) tuple
 >>> masker.repeat_units()
+(('MSTNPKP', 3, 42, 5.571428571428571),)
+>>> masker.repeat_units(period=7)
 (('MSTNPKP', 3, 42, 5.571428571428571),)
 ```
 

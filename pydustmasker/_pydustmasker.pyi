@@ -13,14 +13,16 @@ class _BaseMasker:
     ----------
     sequence : str
         The input sequence that was provided.
-    intervals: tuple of tuples
+    intervals : tuple of tuples
         A tuple of tuples representing the start and end positions of the
         low-complexity regions identified in the sequence.
+    n_masked_bases : int
+        The total number of bases that were masked.
 
     Methods
     -------
     mask
-        Returns the sequence with low-complexity regions masked.
+        Return the sequence with low-complexity regions masked.
     """
 
     sequence: str
@@ -30,7 +32,7 @@ class _BaseMasker:
     def n_masked_bases(self) -> int: ...
     def mask(self, hard: bool = False) -> str:
         """
-        Returns the sequence with low-complexity regions masked.
+        Return the sequence with low-complexity regions masked.
 
         Parameters
         ----------
@@ -39,6 +41,11 @@ class _BaseMasker:
             nucleotide sequences) or 'X' (for protein sequences). By default,
             bases within low-complexity regions are converted to lowercase
             (i.e., soft-masking).
+
+        Returns
+        -------
+        str
+            The masked sequence.
         """
         ...
     def __repr__(self) -> str: ...
@@ -51,15 +58,15 @@ class _BaseMasker:
 
 class DustMasker(_BaseMasker):
     """
-    Identify and mask low-complexity regions in nucleotide sequences using the
-    SDUST algorithm from DustMasker.
+    Identify and mask low-complexity nucleotide regions using the SDUST algorithm.
 
     Parameters
     ----------
     sequence : str
-        The nucleotide sequence to be processed. Characters other than 'A', 'C',
-        'G', 'T', 'a', 'c', 'g', 't' will be considered ambiguous bases.
-        The minimum allowed sequence length is 4 bases.
+        The nucleotide sequence to be processed. ASCII characters other than 'A',
+        'C', 'G', 'T', 'a', 'c', 'g', and 't' are considered ambiguous bases.
+        Non-ASCII characters are rejected. The minimum allowed sequence length is
+        4 bases.
     window_size : int, default: 64
         The length of the window used by symmetric DUST algorithm. The minimum
         allowed value is 4.
@@ -75,7 +82,7 @@ class DustMasker(_BaseMasker):
         The length of the window used by symmetric DUST algorithm.
     score_threshold : int
         Score threshold for identifying low-complexity regions.
-    intervals: tuple of tuples
+    intervals : tuple of tuples
         A tuple of tuples representing the start and end positions of the
         low-complexity regions identified in the sequence.
     n_masked_bases : int
@@ -97,7 +104,8 @@ class DustMasker(_BaseMasker):
     TypeError
         If the input parameters are not of the expected type.
     OverflowError
-        If a negative integer is passed to `window_size` or `score_threshold`.
+        If `window_size` or `score_threshold` cannot be represented by its unsigned
+        integer type, including negative or excessively large values.
     """
 
     window_size: int
@@ -109,8 +117,7 @@ class DustMasker(_BaseMasker):
 
 class LongdustMasker(_BaseMasker):
     """
-    Identify and mask low-complexity regions in nucleotide sequences using the
-    Longdust algorithm.
+    Identify and mask low-complexity nucleotide regions using the Longdust algorithm.
 
     Parameters
     ----------
@@ -127,19 +134,20 @@ class LongdustMasker(_BaseMasker):
     kmer : int, default: 7
         The k-mer length used by the Longdust algorithm. Must be in the range
         [1, 12].
-    gc : float | 'auto' | None, default: None
+    gc : float or {'auto', None}, optional
         GC content for bias correction. If None (default), assume a uniform base
-        composition. If 'auto', compute GC from the input sequence. If a float
-        between 0.0 and 1.0, use that value.
-    xdrop : int | None, default: 50
+        composition. If 'auto', compute the GC content from the input sequence.
+        If a float, it must be between 0.0 and 1.0.
+    xdrop : int or None, optional
         Maximum allowable score drop for X-drop extension termination. During
-        backward scanning, extension continues as long as (max_score - current_score)
-        remains below (score_threshold * xdrop). Once the score drops by more
+        backward scanning, extension continues while (max_score - current_score)
+        does not exceed (score_threshold * xdrop). Once the score drops by more
         than this amount from the peak score observed during the scan, extension
         stops immediately. Lower values enforce stricter extensions and tighter
         boundaries, potentially truncating part of the low-complexity region, whereas
         higher values allow more permissive extensions and looser boundaries, which
-        may include non-low-complexity regions. If set to None, X-drop is disabled.
+        may include non-low-complexity regions. The default is 50. If set to None,
+        X-drop is disabled.
     min_start_cnt : int, default: 3
         Minimum k-mer frequency to start a backward scan. Must be in [2, 65535].
         Lower values are more sensitive but slower.
@@ -161,19 +169,19 @@ class LongdustMasker(_BaseMasker):
         Score threshold for determining low-complexity regions.
     kmer : int
         k-mer length.
-    gc : float | 'auto' | None
+    gc : float or {'auto', None}
         Option used for GC bias correction. Can be None (a uniform base composition
         was assumed), 'auto' (GC was computed from the input sequence), or a float
         between 0.0 and 1.0 (provided by the user).
-    xdrop : int | None
-        Extension X-drop length.
+    xdrop : int or None
+        Multiplier used to derive the X-drop extension threshold.
     min_start_cnt : int
         Minimum k-mer frequency to trigger backward scan.
     approx : bool
         Whether approximate mode was enabled.
     forward_only : bool
         Whether only the forward strand was processed.
-    intervals: tuple of tuples
+    intervals : tuple of tuples
         A tuple of tuples representing the start and end positions of the
         low-complexity regions identified in the sequence.
     n_masked_bases : int
@@ -228,20 +236,20 @@ class LongdustMasker(_BaseMasker):
 
 class TantanMasker(_BaseMasker):
     """
-    Identify and mask low-complexity regions and short-period tandem repeats in
-    nucleotide or protein sequences using the tantan algorithm.
+    Identify and mask low-complexity and short-period tandem repeats using tantan.
 
     Parameters
     ----------
     sequence : str
         The nucleotide or protein sequence to be processed. When `protein` is
-        False, characters other than 'A', 'C', 'G', 'T' (case-insensitive) are
-        treated as ambiguous residues. When `protein` is True, characters other
-        than the standard 20 amino acids (case-insensitive) are considered
-        ambiguous.
+        False, ASCII characters other than 'A', 'C', 'G', and 'T'
+        (case-insensitive) are treated as ambiguous residues. When `protein` is
+        True, ASCII characters other than the standard 20 amino acids
+        (case-insensitive) are considered ambiguous. Non-ASCII characters are
+        rejected in either mode. Must contain at least one character.
     protein : bool, default: False
-        If True, treat the sequence as a protein sequence; otherwise, treat it as
-        a nucleotide sequence.
+        Determines whether the input is treated as a protein sequence (True) or
+        as a nucleotide sequence (False).
     repeat_start : float, default: 0.005
         Probability of transitioning from the background state to a repeat state.
         Must be in the range [0.0, 1.0).
@@ -251,26 +259,24 @@ class TantanMasker(_BaseMasker):
     decay : float, default: 0.9
         Probability decay from one period offset to the next. Must be in the
         range (0.0, 1.0] and be a normal finite number.
-    max_period : int | None, default: None
+    max_period : int or None, optional
         Maximum repeat period (cycle length) to consider. If None (default), it
         resolves to 50 for protein sequences and 100 for nucleotide sequences.
-        `probabilities` retains O(len(sequence)) data; `repeat_units` uses
-        O(sqrt(len(sequence)) * max_period) DP workspace plus O(R) temporary
-        candidates for an active tract.
+        Must be in the range [1, 2147483647].
     gap_open : int, default: 0
         Cost of opening a gap within a repeat.
-    gap_extend : int | None, default: None
+    gap_extend : int or None, optional
         Cost of extending a gap by one more letter. If None (default), gaps within
         repeats are disabled. If set, must be greater than 0.
     score_threshold : float, default: 0.5
-        Posterior probability threshold above which a position is considered part
-        of a repeat. Used by `intervals`/`mask`/`probabilities`; has no
-        effect on `repeat_units`. Must be in the range [0.0, 1.0].
+        Posterior probability threshold at or above which a position is considered
+        part of a repeat. Used by `intervals` and `mask`. Has no effect on
+        `probabilities` or `repeat_units`. Must be in the range [0.0, 1.0].
     min_copy_number : float, default: 2.0
-        Minimum estimated copy number (tract length divided by consensus unit
-        length) for a tandem repeat tract to be reported by `repeat_units`. Must
-        be finite and non-negative. Has no effect on
-        `intervals`/`mask`/`probabilities`.
+        Minimum copy-number estimate from the Viterbi path for a tandem repeat
+        tract to be reported by `repeat_units`. Selecting a `period` does not
+        recompute this estimate from the selected unit. Must be finite and
+        non-negative. Has no effect on `intervals`, `mask`, and `probabilities`.
 
     Attributes
     ----------
@@ -286,14 +292,16 @@ class TantanMasker(_BaseMasker):
         Probability decay per unit increase in repeat period.
     max_period : int
         Maximum tandem repeat period (in letters) considered. Resolved from
-        `None` to 50 (protein) or 100 (nucleotide) when not provided explicitly.
+        None to 50 (protein) or 100 (nucleotide) when not provided explicitly.
     gap_open : int
         Cost of opening a gap within a repeat.
-    gap_extend : int | None
-        Cost of extending a gap by one more letter, or `None` if gaps within
+    gap_extend : int or None
+        Cost of extending a gap by one more letter, or None if gaps within
         repeats are disabled.
     score_threshold : float
-        Posterior probability threshold used to determine `intervals`/`mask`.
+        Posterior probability threshold at or above which a position is considered
+        part of a repeat by `intervals` and `mask`. Has no effect on `probabilities`
+        or `repeat_units`.
     min_copy_number : float
         Minimum copy number used to filter the tracts returned by `repeat_units`.
     intervals : tuple of tuples
@@ -312,20 +320,21 @@ class TantanMasker(_BaseMasker):
     mask
         Returns the sequence with tandem repeat regions masked.
     repeat_units
-        Returns the consensus tandem repeat unit(s) identified via a Viterbi
-        decode, independent of `intervals`.
+        Returns the consensus tandem repeat unit(s), optionally for a selected
+        period, identified via a Viterbi decode independent of `intervals`.
 
     Raises
     ------
     ValueError
         If the input parameters violate the following constraints:
 
+        * sequence is empty
         * sequence contains a non-ASCII character
         * repeat_start is not in [0.0, 1.0)
         * repeat_end is not in [0.0, 1.0]
         * decay is not a normal finite number in (0.0, 1.0]
         * score_threshold is not in [0.0, 1.0]
-        * max_period is less than 1
+        * max_period is not in [1, 2147483647]
         * gap_extend is 0
         * the combined repeat/gap probabilities form an invalid distribution
           (i.e. `repeat_end + 2 * first_gap_prob > 1.0`, where the gap
@@ -336,8 +345,8 @@ class TantanMasker(_BaseMasker):
     TypeError
         If the input parameters are not of the expected type.
     OverflowError
-        If `max_period`, `gap_open` or `gap_extend` is supplied as a
-        negative integer, since they are stored as unsigned values.
+        If `max_period`, `gap_open`, or `gap_extend` cannot be represented by its
+        unsigned integer type, including negative or excessively large values.
     """
 
     protein: bool
@@ -364,10 +373,22 @@ class TantanMasker(_BaseMasker):
         score_threshold: float = 0.5,
         min_copy_number: float = 2.0,
     ) -> None: ...
-    def repeat_units(self) -> tuple[tuple[str, int, int, float], ...]:
+    def repeat_units(
+        self, period: int | None = None
+    ) -> tuple[tuple[str, int, int, float], ...]:
         """
-        Returns consensus tandem repeat units from an independent Viterbi
-        decode. Its tract boundaries can differ from `intervals`.
+        Return consensus tandem repeat units from an independent Viterbi decode.
+
+        The decoded tract boundaries can differ from `intervals`.
+
+        Parameters
+        ----------
+        period : int or None, optional
+            Repeat period to select from the candidates on the decoded Viterbi
+            path. If None (default), the most frequent period in each tract is
+            selected.
+            Must be in the range [1, `max_period`]. Tracts without candidates of
+            the requested period are omitted.
 
         Returns
         -------
@@ -376,4 +397,13 @@ class TantanMasker(_BaseMasker):
             `start`. Gaps can make `copy_number` differ from tract length divided
             by unit length. Tracts below `min_copy_number` are omitted. Ambiguous
             letters in units are reported as 'N' ('X' for protein).
+
+        Raises
+        ------
+        ValueError
+            If `period` is not in the range [1, `max_period`].
+        TypeError
+            If `period` is not an integer or None.
+        OverflowError
+            If `period` is negative or too large to fit in an unsigned integer.
         """

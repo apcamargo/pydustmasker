@@ -1219,9 +1219,10 @@ fn traceback(
     seq: &[u8],
     checkpoints: &[f64],
     block_size: usize,
+    selected_period: Option<usize>,
 ) -> Vec<RepeatTract> {
     let mut state = ViterbiState::Background;
-    let mut accumulator = TractAccumulator::new(hmm.max_period);
+    let mut accumulator = TractAccumulator::new(hmm.max_period, selected_period);
 
     // Reused scratch columns for one block.
     let col_len = hmm.column_len();
@@ -1265,9 +1266,10 @@ fn traceback_simd<S: Simd>(
     seq: &[u8],
     checkpoints: &[f64],
     block_size: usize,
+    selected_period: Option<usize>,
 ) -> Vec<RepeatTract> {
     let mut state = ViterbiState::Background;
-    let mut accumulator = TractAccumulator::new(hmm.max_period);
+    let mut accumulator = TractAccumulator::new(hmm.max_period, selected_period);
 
     let col_len = hmm.column_len();
     let mut columns = vec![0.0; (block_size + 1) * col_len];
@@ -1307,21 +1309,20 @@ fn traceback_simd<S: Simd>(
 // Accumulates maximal non-background Viterbi tracts.
 struct TractAccumulator {
     max_period: usize,
+    selected_period: Option<usize>,
     tract_start: usize,
-    // Whole-unit count and the most recent unit boundary.
     completed_units: usize,
     last_boundary: usize,
-    // Repeat unit candidates from the current tract.
     units_seen: Vec<(usize, usize)>,
-    // Period frequencies indexed by period.
     period_counts: Vec<usize>,
     tracts: Vec<RepeatTract>,
 }
 
 impl TractAccumulator {
-    fn new(max_period: usize) -> Self {
+    fn new(max_period: usize, selected_period: Option<usize>) -> Self {
         Self {
             max_period,
+            selected_period,
             tract_start: 0,
             completed_units: 0,
             last_boundary: 0,
@@ -1375,23 +1376,29 @@ impl TractAccumulator {
     }
 
     fn build_tract(&mut self, end: usize, final_offset: usize, seq: &[u8]) -> Option<RepeatTract> {
-        self.period_counts.fill(0);
-        for &(_, period) in &self.units_seen {
-            self.period_counts[period] += 1;
-        }
-        let mut best_len = 0;
-        let mut best_count = 0;
-        for (period, &count) in self.period_counts.iter().enumerate() {
-            if count > best_count {
-                best_count = count;
-                best_len = period;
+        let best_len = if let Some(period) = self.selected_period {
+            period
+        } else {
+            let mut best_len = 0;
+            let mut best_count = 0;
+            self.period_counts.fill(0);
+            for &(_, period) in &self.units_seen {
+                self.period_counts[period] += 1;
             }
-        }
-        if best_count == 0 {
-            return None;
-        }
+            for (period, &count) in self.period_counts.iter().enumerate() {
+                if count > best_count {
+                    best_count = count;
+                    best_len = period;
+                }
+            }
+            if best_count == 0 {
+                return None;
+            }
+            best_len
+        };
 
-        // Resolve unit ties by earliest sequence position.
+        // Resolve unit ties by earliest sequence position, matching the default
+        // path's existing behavior.
         let mut unit_counts: HashMap<&[u8], (usize, usize)> = HashMap::new();
         for &(unit_start, period) in &self.units_seen {
             if period != best_len {
@@ -1400,9 +1407,11 @@ impl TractAccumulator {
             let unit = &seq[unit_start..unit_start + period];
             unit_counts.entry(unit).or_insert((0, unit_start)).0 += 1;
         }
-        let (&best_unit, _) = unit_counts
-            .iter()
-            .max_by_key(|(_, &(count, first_pos))| (count, std::cmp::Reverse(first_pos)))?;
+
+        let best_unit = unit_counts
+            .into_iter()
+            .max_by_key(|(_, (count, first_pos))| (*count, std::cmp::Reverse(*first_pos)))?
+            .0;
 
         Some(RepeatTract {
             unit: best_unit.to_vec(),
@@ -1443,7 +1452,15 @@ impl Tantan {
     }
 
     pub fn repeat_units(sequence: &[u8], options: TantanOptions) -> Vec<RepeatTract> {
-        Self::new(options).inner_repeat_units(sequence)
+        Self::new(options).inner_repeat_units(sequence, None)
+    }
+
+    pub fn repeat_units_for_period(
+        sequence: &[u8],
+        options: TantanOptions,
+        period: usize,
+    ) -> Vec<RepeatTract> {
+        Self::new(options).inner_repeat_units(sequence, Some(period))
     }
 
     fn inner_probabilities(&self, sequence: &[u8]) -> Vec<f32> {
@@ -1458,7 +1475,11 @@ impl Tantan {
         hmm.calc_repeat_probs(&encoded)
     }
 
-    fn inner_repeat_units(&self, sequence: &[u8]) -> Vec<RepeatTract> {
+    fn inner_repeat_units(
+        &self,
+        sequence: &[u8],
+        selected_period: Option<usize>,
+    ) -> Vec<RepeatTract> {
         let encoded = encode_with_alphabet(sequence, self.options.alphabet);
         let hmm = ViterbiHmm::new(
             &tables(self.options.alphabet).log_odds,
@@ -1470,11 +1491,11 @@ impl Tantan {
         let level = simd_level();
         let mut tracts = if hmm.has_gaps || level.is_fallback() {
             let checkpoints = compute_checkpoints(&hmm, &encoded, block_size);
-            traceback(&hmm, &encoded, &checkpoints, block_size)
+            traceback(&hmm, &encoded, &checkpoints, block_size, selected_period)
         } else {
             dispatch!(level, simd => {
                 let checkpoints = compute_checkpoints_simd(simd, &hmm, &encoded, block_size);
-                traceback_simd(simd, &hmm, &encoded, &checkpoints, block_size)
+                traceback_simd(simd, &hmm, &encoded, &checkpoints, block_size, selected_period)
             })
         };
         tracts.retain(|t| t.copy_number >= self.options.min_copy_number);

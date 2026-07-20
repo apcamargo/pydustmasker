@@ -60,10 +60,7 @@ icon: lucide/rocket
 
 ## Usage
 
-To identify and mask low-complexity regions in a nucleotide sequence, create an instance of a masker class and provide your sequence to it. A masker class implements a specific low-complexity detection algorithm and provides methods to retrieve the detected regions and to generate a masked version of the sequence. `pydustmasker` provides three such classes, corresponding to different detection algorithms: [SDUST](theory#sdust), [Longdust](theory#longdust), and [tantan](theory#tantan). These algorithms are implemented in three different classes:
-- [`DustMasker`][pydustmasker.DustMasker]
-- [`LongdustMasker`][pydustmasker.LongdustMasker]
-- [`TantanMasker`][pydustmasker.TantanMasker]
+To identify and mask low-complexity regions in a nucleotide sequence, create an instance of a masker class and provide your sequence to it. A masker class implements a specific low-complexity detection algorithm and provides methods to retrieve the detected regions and to generate a masked version of the sequence. `pydustmasker` provides three such classes, corresponding to different detection algorithms: [SDUST](theory#sdust), [Longdust](theory#longdust), and [tantan](theory#tantan). These algorithms are implemented in three different classes: [`DustMasker`][pydustmasker.DustMasker], [`LongdustMasker`][pydustmasker.LongdustMasker], and [`TantanMasker`][pydustmasker.TantanMasker].
 
 ```pycon
 >>> import pydustmasker
@@ -112,25 +109,22 @@ The identification of low-complexity regions can be tuned via algorithm-specific
 
 ### Identifying tandem repeats in protein sequences
 
-Although the SDUST and Longdust are specifically designed for nucleotide sequences, the tantan algorithm can also be used to identify tandem repeats in proteins. The `TantanMasker` class provides a `protein` parameter that enables this functionality.
+Although the SDUST and Longdust are specifically designed for nucleotide sequences, tandem repeats in proteins can be identified using the tantan algorithm via the `TantanMasker` class.
 
 ```pycon
-# Example protein sequence with an imperfect tandem repeat
->>> protein = "QAEMSTNPKPMSTNPKPMSTDPKPMSTNPKPMSTNPKPMSTNDEH"
-# Set protein=True to identify tandem repeats in a protein sequence
->>> masker = pydustmasker.TantanMasker(protein, protein=True)
-# Get the intervals of the tandem repeats identified in the sequence
+>>> prot_seq = "QAEMSTNPKPMSTNPKPMSTDPKPMSTNPKPMSTNPKPMSTNDEH"
+>>> masker = pydustmasker.TantanMasker(prot_seq, protein=True)
 >>> masker.intervals
 ((9, 38),)
-# Generate a soft-masked sequence
->>> masker.mask(hard=True)
+>>> masker.mask(hard=True) # (2)!
 'QAEMSTNPKXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXEH'
 ```
+1. The `protein` parameter must be set to `True` to enable tandem repeat detection in protein sequences. By default, `TantanMasker` will treat the input as a nucleotide sequence.
+2. Low-complexity regions in protein sequences are hard-masked with `X`, the standard code for ambiguous amino acids, rather than `N` as in nucleotide sequences.
 
 In addition to masking, `TantanMasker` can determine the repeating units through the `repeat_units()` method.
 
 ```pycon
-# Each repeat unit is represented by a (unit, start, end, copy_number) tuple
 >>> masker.repeat_units() # (1)!
 (('MSTNPKP', 3, 42, 5.571428571428571),)
 ```

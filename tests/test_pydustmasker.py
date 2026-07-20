@@ -275,6 +275,56 @@ def test_tantanmasker_repeat_units():
     assert TantanMasker("ATTATTATTATTATT").repeat_units() == (("ATT", 0, 15, 5.0),)
 
 
+def test_tantanmasker_repeat_units_period():
+    seq = "AT" * 10 + "GCA" * 10
+    masker = TantanMasker(seq)
+
+    assert masker.repeat_units() == (
+        ("AT", 0, 20, 10.0),
+        ("GCA", 20, 50, 10.0),
+    )
+    assert masker.repeat_units(period=2) == (("AT", 0, 20, 10.0),)
+    assert masker.repeat_units(period=3) == (("GCA", 20, 50, 10.0),)
+    assert masker.repeat_units(period=4) == ()
+    assert masker.repeat_units(None) == masker.repeat_units()
+
+
+def test_tantanmasker_repeat_units_period_with_gaps():
+    seq = "ACACACACACACCATCATCATCAT"
+    masker = TantanMasker(seq, gap_open=7, gap_extend=1)
+    default_result = (("CAT", 0, 24, 9.666666666666666),)
+    period_2_result = (("AC", 0, 24, 9.666666666666666),)
+
+    assert masker.repeat_units() == default_result
+    assert masker.repeat_units(period=2) == period_2_result
+    assert masker.repeat_units(period=3) == default_result
+    assert masker.repeat_units(period=4) == ()
+
+
+def test_tantanmasker_repeat_units_period_validation():
+    cases = (
+        (TantanMasker("ACACACAC"), 100),
+        (TantanMasker("ACACACAC", protein=True), 50),
+        (TantanMasker("ACACACAC", max_period=7), 7),
+    )
+    for masker, max_period in cases:
+        for period in (0, max_period + 1):
+            message = (
+                rf"invalid period '{period}', must be in the range "
+                rf"\[1, {max_period}\]"
+            )
+            with pytest.raises(ValueError, match=message):
+                masker.repeat_units(period)
+
+    masker = TantanMasker("ACACACAC")
+    with pytest.raises(OverflowError):
+        masker.repeat_units(-1)
+    with pytest.raises(TypeError):
+        masker.repeat_units("2")  # type: ignore[arg-type]
+    with pytest.raises(OverflowError):
+        masker.repeat_units(2**200)
+
+
 def test_tantanmasker_repeat_units_max_period_boundaries():
     # Period 1 is the valid minimum DP state space
     assert TantanMasker("A" * 20, max_period=1).repeat_units() == (("A", 0, 20, 20.0),)
