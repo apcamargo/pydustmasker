@@ -326,7 +326,7 @@ impl BaseMasker {
     /// hard : bool, default: False
     ///     If True, low-complexity regions will be masked with 'N' (for
     ///     nucleotide sequences) or 'X' (for protein sequences). By default,
-    ///     bases within low-complexity regions are converted to lowercase
+    ///     residues within low-complexity regions are converted to lowercase
     ///     (i.e., soft-masking).
     ///
     /// Returns
