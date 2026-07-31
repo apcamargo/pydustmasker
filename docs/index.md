@@ -113,7 +113,7 @@ Although the SDUST and Longdust are specifically designed for nucleotide sequenc
 
 ```pycon
 >>> prot_seq = "QAEMSTNPKPMSTNPKPMSTDPKPMSTNPKPMSTNPKPMSTNDEH"
->>> masker = pydustmasker.TantanMasker(prot_seq, protein=True)
+>>> masker = pydustmasker.TantanMasker(prot_seq, protein=True) # (1)!
 >>> masker.intervals
 ((9, 38),)
 >>> masker.mask(hard=True) # (2)!
