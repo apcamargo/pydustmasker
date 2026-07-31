@@ -119,6 +119,7 @@ Although the SDUST and Longdust are specifically designed for nucleotide sequenc
 >>> masker.mask(hard=True) # (2)!
 'QAEMSTNPKXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXEH'
 ```
+
 1. The `protein` parameter must be set to `True` to enable tandem repeat detection in protein sequences. By default, `TantanMasker` will treat the input as a nucleotide sequence.
 2. Low-complexity regions in protein sequences are hard-masked with `X`, the standard code for ambiguous amino acids, rather than `N` as in nucleotide sequences.
 
