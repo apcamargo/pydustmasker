@@ -93,7 +93,7 @@ You can generate a masked version of the sequence using the `mask()` method. By 
 
 ### Tuning the detection of low-complexity regions
 
-The identification of low-complexity regions can be tuned via algorithm-specific parameters. All of the provided masker classes provide multiple parameters, documented in the [API reference](/api), that enable control how low-complexity regions are determined. One shared parameter is `score_threshold`, which controls detection stringency: lowering this threshold results in more regions being classified as low-complexity, whereas increasing it restricts detection to the most clearly low-complexity regions.
+The identification of low-complexity regions can be tuned via algorithm-specific parameters. All of the provided masker classes provide multiple parameters, documented in the [API reference](./api), that enable control how low-complexity regions are determined. One shared parameter is `score_threshold`, which controls detection stringency: lowering this threshold results in more regions being classified as low-complexity, whereas increasing it restricts detection to the most clearly low-complexity regions.
 
 ```pycon
 >>> masker = pydustmasker.DustMasker(seq, score_threshold=10) # (1)!
