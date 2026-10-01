@@ -2,6 +2,18 @@ use crate::common::{compute_gc_content, encode_sequence, reverse_complement_enco
 use std::collections::VecDeque;
 use std::f64::consts::{E, PI};
 use std::ops::Range;
+use std::sync::OnceLock;
+
+// Maximum number of series terms summed per f[L] entry.
+const MAX_N: usize = 10000;
+// Covers every supported window size (at most 65535).
+const LN_TABLE_LEN: usize = 1 << 16;
+
+// ln(i) for i < LN_TABLE_LEN, computed once per process.
+fn ln_table() -> &'static [f64] {
+    static TABLE: OnceLock<Vec<f64>> = OnceLock::new();
+    TABLE.get_or_init(|| (0..LN_TABLE_LEN).map(|i| (i as f64).ln()).collect())
+}
 
 // Candidate forward positions (when backward scan suggests forward check)
 #[derive(Clone, Debug)]
@@ -106,9 +118,10 @@ impl Longdust {
         };
 
         // Precompute log values
+        let ln = ln_table();
         let mut c = vec![0.0f64; options.window_size + 1];
         for (i, val) in c.iter_mut().enumerate().skip(2) {
-            *val = (i as f64).ln();
+            *val = ln.get(i).copied().unwrap_or_else(|| (i as f64).ln());
         }
 
         // Calculate max_test
@@ -593,7 +606,8 @@ impl Longdust {
         }
     }
 
-    // Math helpers for f() table computation:
+    // Math helpers for f() table computation. The table builders are marked
+    // inline(never) so this one-time setup does not change the scan loops' code layout.
 
     // Stirling's approximation for log(n!)
     fn stirlings_approx(lambda: f64) -> f64 {
@@ -613,6 +627,7 @@ impl Longdust {
     // This version assumes a uniform background (50% GC content) as it passes a
     // density ratio (dr) of 1.0, making it an optimized shortcut for ld_cal_f2 when
     // GC correction is disabled.
+    #[inline(never)]
     fn calculate_f(k: usize, max_l: usize) -> Vec<f64> {
         let n_kmer = 1i32 << (2 * k);
         let dr = 1.0;
@@ -623,26 +638,23 @@ impl Longdust {
     // This version uses k-mer density ratios (dr) based on genome-wide GC content
     // to adjust the expected scores, preventing over-masking of GC/AT-rich sequences.
     // It relies on a summation for small lambda and f_large() for large lambda.
+    #[inline(never)]
     fn calculate_f_gc(k: usize, max_l: usize, gc: f64) -> Vec<f64> {
-        let n_kmer = 1usize << (2 * k);
         let mut dr = vec![0.0f64; k + 1];
         for (i, val) in dr.iter_mut().enumerate().take(k + 1) {
             *val = (gc / 0.5).powi(i as i32) * ((1.0 - gc) / 0.5).powi((k - i) as i32);
         }
+        // Each position is G/C in 2 of 4 letters, so C(k, i) * 2^k k-mers have exactly i G/C bases.
         let mut n_dr = vec![0i32; k + 1];
-        for x in 0..n_kmer {
-            let mut n_gc = 0;
-            for i in 0..k {
-                let nt = (x >> (2 * i)) & 3;
-                if nt == 1 || nt == 2 {
-                    n_gc += 1;
-                }
-            }
-            n_dr[n_gc] += 1;
+        let mut binomial = 1usize;
+        for (i, val) in n_dr.iter_mut().enumerate() {
+            *val = (binomial << k) as i32;
+            binomial = binomial * (k - i) / (i + 1);
         }
         Self::calculate_f_internal(k, max_l, k + 1, &n_dr, &dr)
     }
 
+    #[inline(never)]
     fn calculate_f_internal(
         k: usize,
         max_l: usize,
@@ -650,7 +662,7 @@ impl Longdust {
         n_dr: &[i32],
         dr: &[f64],
     ) -> Vec<f64> {
-        const MAX_N: usize = 10000;
+        let ln = ln_table();
         let n_kmer = 1usize << (2 * k);
         let mut f = vec![0.0f64; max_l + 1];
         for (l, val) in f.iter_mut().enumerate().skip(1).take(max_l) {
@@ -661,8 +673,8 @@ impl Longdust {
                     let mut x = 0.0f64;
                     let mut sn = 0.0f64;
                     let mut y = lambda;
-                    for n in 2..=MAX_N {
-                        sn += (n as f64).ln();
+                    for (n, &ln_n) in ln.iter().enumerate().take(MAX_N + 1).skip(2) {
+                        sn += ln_n;
                         y *= lambda / (n as f64);
                         let z = y * sn;
                         if z < x * f64::EPSILON {
