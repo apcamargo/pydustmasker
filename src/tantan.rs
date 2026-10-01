@@ -1,5 +1,6 @@
 use crate::common::{encode_with_alphabet, Alphabet};
 use fearless_simd::{dispatch, prelude::*, Level, Simd};
+use fearless_simd_macros::simd;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -653,7 +654,7 @@ impl<'a> TantanHmm<'a> {
         dispatch!(level, simd => self.calc_repeat_probs_simd(simd, sequence))
     }
 
-    #[inline(always)]
+    #[simd]
     fn calc_repeat_probs_simd<S: Simd>(&mut self, simd: S, sequence: &[u8]) -> Vec<f32> {
         let seq_len = sequence.len();
         let mut probs = vec![0.0f32; seq_len];
@@ -676,7 +677,7 @@ impl<'a> TantanHmm<'a> {
         probs
     }
 
-    #[inline(always)]
+    #[simd]
     fn calc_forward_transition_and_emission_simd<S: Simd>(
         &mut self,
         simd: S,
@@ -687,7 +688,7 @@ impl<'a> TantanHmm<'a> {
         let f2f0 = self.f2f0;
         let lr_row = self.likelihood.row(sequence[pos]);
         let max_offset = max_offset_in_sequence(pos, self.max_period);
-        let lanes = S::f64s::N;
+        let lanes = S::f64s::LEN;
         let bulk_end = max_offset - max_offset % lanes;
 
         let letters = &sequence[pos - max_offset..pos];
@@ -723,7 +724,7 @@ impl<'a> TantanHmm<'a> {
         self.background_prob = b * self.b2b + from_foreground * self.f2b;
     }
 
-    #[inline(always)]
+    #[simd]
     fn calc_emission_and_backward_transition_simd<S: Simd>(
         &mut self,
         simd: S,
@@ -734,7 +735,7 @@ impl<'a> TantanHmm<'a> {
         let f2f0 = self.f2f0;
         let lr_row = self.likelihood.row(sequence[pos]);
         let max_offset = max_offset_in_sequence(pos, self.max_period);
-        let lanes = S::f64s::N;
+        let lanes = S::f64s::LEN;
         let bulk_end = max_offset - max_offset % lanes;
 
         let letters = &sequence[pos - max_offset..pos];
@@ -939,7 +940,7 @@ impl<'a> ViterbiHmm<'a> {
         new[0] = (self.b2b + old[0]).max(to_foreground);
     }
 
-    #[inline(always)]
+    #[simd]
     fn calc_scores_no_gaps_simd<S: Simd>(
         &self,
         simd: S,
@@ -951,7 +952,7 @@ impl<'a> ViterbiHmm<'a> {
         let max_offset = max_offset_in_sequence(pos, self.max_period);
         let log_row = self.log_odds.row(seq[pos]);
         let to_background = self.f2b + old[0];
-        let lanes = S::f64s::N;
+        let lanes = S::f64s::LEN;
         let bulk_end = max_offset - max_offset % lanes;
 
         let letters = &seq[pos - max_offset..pos];
@@ -1185,7 +1186,7 @@ fn compute_checkpoints(hmm: &ViterbiHmm, seq: &[u8], block_size: usize) -> Vec<f
     checkpoints
 }
 
-#[inline(always)]
+#[simd]
 fn compute_checkpoints_simd<S: Simd>(
     simd: S,
     hmm: &ViterbiHmm,
@@ -1259,7 +1260,7 @@ fn traceback(
     accumulator.finish(state, seq.len(), seq)
 }
 
-#[inline(always)]
+#[simd]
 fn traceback_simd<S: Simd>(
     simd: S,
     hmm: &ViterbiHmm,
