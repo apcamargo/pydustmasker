@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Changed
-- Bump `fearless_simd` to `1.0` and `pyo3` to `0.29.2`.
+- Bump `fearless_simd` to `1.0`, `pyo3` to `0.29.3`, and `thiserror` to `2.0.21`.
 - SIMD-generic functions now use the `#[simd]` attribute from `fearless_simd_macros` instead of manual `#[inline(always)]`.
 - `LongdustMasker` now reuses a shared logarithm table and computes per-GC k-mer counts in closed form when building its score table.
 
