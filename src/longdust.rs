@@ -8,6 +8,9 @@ use std::sync::OnceLock;
 const MAX_N: usize = 10000;
 // Covers every supported window size (at most 65535).
 const LN_TABLE_LEN: usize = 1 << 16;
+// Longdust::process slices ln_table()[..=window_size] and calculate_f_internal
+// reads ln(n) for n <= MAX_N, so both bounds must fit in the table.
+const _: () = assert!(crate::MAX_LONGDUST_WINDOW_SIZE < LN_TABLE_LEN && MAX_N < LN_TABLE_LEN);
 
 // ln(i) for i < LN_TABLE_LEN, computed once per process.
 fn ln_table() -> &'static [f64] {
@@ -15,8 +18,93 @@ fn ln_table() -> &'static [f64] {
     TABLE.get_or_init(|| (0..LN_TABLE_LEN).map(|i| (i as f64).ln()).collect())
 }
 
+// Math helpers for f() table computation. The table builders below are marked
+// inline(never) so this one-time setup does not change the scan loops' code layout.
+
+// Number of distinct DNA k-mers (4^k).
+fn n_kmers(k: usize) -> usize {
+    1 << (2 * k)
+}
+
+// Stirling's approximation for log(n!)
+fn stirlings_approx(lambda: f64) -> f64 {
+    lambda * (lambda.ln() - 1.0) + 0.5 * (2.0 * PI * E * lambda).ln()
+}
+
+// Calculates a high-precision approximation for the statistical score
+// adjustment term f[L] when the expected k-mer frequency (lambda) is large (>= 30.0).
+// It uses a specialized form of Stirling's approximation to ensure numerical stability
+// and high performance, avoiding computationally expensive summations and overflows.
+fn f_large(lambda: f64) -> f64 {
+    stirlings_approx(lambda)
+        - 1.0 / (12.0 * lambda) * (1.0 + 0.5 / lambda + 19.0 / (30.0 * lambda * lambda))
+}
+
+// Calculates the default DUST score adjustment table (f[L]) for all lengths L <= max_l.
+// This version assumes a uniform background (50% GC content), so every k-mer has a
+// density ratio (dr) of 1.0 and a single class of 4^k k-mers replaces the k + 1 GC
+// classes used by calculate_f_gc.
+#[inline(never)]
+fn calculate_f(k: usize, max_l: usize) -> Vec<f64> {
+    calculate_f_internal(k, max_l, &[n_kmers(k) as f64], &[1.0])
+}
+
+// Calculates the DUST score adjustment table (f[L]) for all lengths L <= max_l.
+// This version uses k-mer density ratios (dr) based on genome-wide GC content
+// to adjust the expected scores, preventing over-masking of GC/AT-rich sequences.
+#[inline(never)]
+fn calculate_f_gc(k: usize, max_l: usize, gc: f64) -> Vec<f64> {
+    let mut dr = vec![0.0f64; k + 1];
+    for (i, val) in dr.iter_mut().enumerate() {
+        *val = (gc / 0.5).powi(i as i32) * ((1.0 - gc) / 0.5).powi((k - i) as i32);
+    }
+    // Each position is G/C in 2 of 4 letters, so C(k, i) * 2^k k-mers have exactly i G/C bases.
+    let mut n_dr = vec![0.0f64; k + 1];
+    let mut binomial = 1usize;
+    for (i, val) in n_dr.iter_mut().enumerate() {
+        *val = (binomial << k) as f64;
+        binomial = binomial * (k - i) / (i + 1);
+    }
+    calculate_f_internal(k, max_l, &n_dr, &dr)
+}
+
+// Sums the expected score of each k-mer class, weighted by the number of k-mers in it.
+// It relies on a summation for small lambda and f_large() for large lambda.
+#[inline(never)]
+fn calculate_f_internal(k: usize, max_l: usize, n_dr: &[f64], dr: &[f64]) -> Vec<f64> {
+    let ln = ln_table();
+    let n_kmer = n_kmers(k);
+    let mut f = vec![0.0f64; max_l + 1];
+    for (l, val) in f.iter_mut().enumerate().skip(1) {
+        let mut accum = 0.0f64;
+        for (dr_i, n_dr_i) in dr.iter().zip(n_dr.iter()) {
+            let lambda = (l as f64) / (n_kmer as f64) * dr_i;
+            let fli = if lambda < 30.0 {
+                let mut x = 0.0f64;
+                let mut sn = 0.0f64;
+                let mut y = lambda;
+                for (n, &ln_n) in ln.iter().enumerate().take(MAX_N + 1).skip(2) {
+                    sn += ln_n;
+                    y *= lambda / (n as f64);
+                    let z = y * sn;
+                    if z < x * f64::EPSILON {
+                        break;
+                    }
+                    x += z;
+                }
+                x * (-lambda).exp()
+            } else {
+                f_large(lambda)
+            };
+            accum += fli * n_dr_i;
+        }
+        *val = accum;
+    }
+    f
+}
+
 // Candidate forward positions (when backward scan suggests forward check)
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct ForwardPosition {
     pos: i32,
     max_score: f64,
@@ -73,11 +161,13 @@ impl Default for LongdustOptions {
 pub struct Longdust {
     // Parameters struct
     options: LongdustOptions,
-    // f[L]: precomputed expected score for random sequence of length L,
+    // `f[L]`: precomputed expected score for random sequence of length L,
     // subtracted from raw score to normalize for statistical significance
     f: Vec<f64>,
-    // c[i] = ln(i): precomputed log values for efficient ln(count!) computation
-    c: Vec<f64>,
+    // `c[i] = ln(i)` for i <= window_size, borrowed from the shared ln table, for
+    // efficient ln(count!) computation. `c[0] = -inf` is never read: every lookup
+    // uses a count >= 1.
+    c: &'static [f64],
     // Sliding window queue of encoded k-mers (VecDeque for O(1) push_back/pop_front)
     // Each element: (kmer_value << 1) | ambiguous_flag
     window: VecDeque<u32>,
@@ -102,27 +192,23 @@ impl Longdust {
     pub fn process(sequence: &[u8], options: LongdustOptions) -> Vec<(usize, usize)> {
         // Encode sequence
         let encoded_seq = encode_sequence(sequence);
-        let table_size = 1usize << (2 * options.kmer);
+        let table_size = n_kmers(options.kmer);
 
         // Resolve GC mode and calculate the f table
         let f = match options.gc {
-            GcOption::Uniform => Self::calculate_f(options.kmer, options.window_size + 1),
+            GcOption::Uniform => calculate_f(options.kmer, options.window_size + 1),
             GcOption::Fixed(gc_val) => {
-                Self::calculate_f_gc(options.kmer, options.window_size + 1, gc_val)
+                calculate_f_gc(options.kmer, options.window_size + 1, gc_val)
             }
             GcOption::Auto => {
                 // Compute GC from encoded sequence
                 let gc_val = compute_gc_content(&encoded_seq);
-                Self::calculate_f_gc(options.kmer, options.window_size + 1, gc_val)
+                calculate_f_gc(options.kmer, options.window_size + 1, gc_val)
             }
         };
 
-        // Precompute log values
-        let ln = ln_table();
-        let mut c = vec![0.0f64; options.window_size + 1];
-        for (i, val) in c.iter_mut().enumerate().skip(2) {
-            *val = ln.get(i).copied().unwrap_or_else(|| (i as f64).ln());
-        }
+        // Log values for counts up to the window size
+        let c = &ln_table()[..=options.window_size];
 
         // Calculate max_test
         let mut max_test = 0i32;
@@ -184,13 +270,13 @@ impl Longdust {
 
     // Process a single encoded strand
     fn inner_process(&mut self, encoded_seq: &[u8]) {
-        let mask = (1u32 << (2 * self.options.kmer)) - 1;
+        let mask = (n_kmers(self.options.kmer) - 1) as u32;
 
         self.results.clear();
         self.window.clear();
 
         // Ensure window_ht is sized appropriately and zero it
-        let expected = ((mask + 1) as usize).max(1);
+        let expected = n_kmers(self.options.kmer);
         if self.window_ht.len() != expected {
             self.window_ht.resize(expected, 0);
         }
@@ -383,9 +469,13 @@ impl Longdust {
                 // SAFETY: k < 2^(2*kmer) = window_ht.len() and ht.len()
                 let wht_k = unsafe { *self.window_ht.get_unchecked(k) };
                 let ht_k = unsafe { *self.ht.get_unchecked(k) };
-                // SAFETY: idx = (wht_k + 1) - ht_k where wht_k <= window_size and ht_k <= wht_k + 1
-                // So idx <= window_size, and c is sized to window_size + 1
-                unsafe { *self.c.get_unchecked((wht_k + 1 - ht_k) as usize) }
+                // SAFETY: ht was cleared at the start of this scan and was just incremented
+                // for k, so ht_k counts k in window[i..] while wht_k counts it in the whole
+                // window: 1 <= ht_k <= wht_k <= window_size. Hence
+                // 1 <= wht_k - ht_k + 1 <= window_size, and c is sized to window_size + 1.
+                // Subtracting first also avoids u16 overflow when wht_k == u16::MAX.
+                debug_assert!(1 <= ht_k && ht_k <= wht_k);
+                unsafe { *self.c.get_unchecked((wht_k - ht_k + 1) as usize) }
             } else {
                 0.0
             };
@@ -604,92 +694,5 @@ impl Longdust {
         } else {
             self.results.push(start..end);
         }
-    }
-
-    // Math helpers for f() table computation. The table builders are marked
-    // inline(never) so this one-time setup does not change the scan loops' code layout.
-
-    // Stirling's approximation for log(n!)
-    fn stirlings_approx(lambda: f64) -> f64 {
-        lambda * (lambda.ln() - 1.0) + 0.5 * (2.0 * PI * E * lambda).ln()
-    }
-
-    // Calculates a high-precision approximation for the statistical score
-    // adjustment term f[L] when the expected k-mer frequency (lambda) is large (>= 30.0).
-    // It uses a specialized form of Stirling's approximation to ensure numerical stability
-    // and high performance, avoiding computationally expensive summations and overflows.
-    fn f_large(lambda: f64) -> f64 {
-        Self::stirlings_approx(lambda)
-            - 1.0 / (12.0 * lambda) * (1.0 + 0.5 / lambda + 19.0 / (30.0 * lambda * lambda))
-    }
-
-    // Calculates the default DUST score adjustment table (f[L]) for all lengths L <= max_l.
-    // This version assumes a uniform background (50% GC content) as it passes a
-    // density ratio (dr) of 1.0, making it an optimized shortcut for ld_cal_f2 when
-    // GC correction is disabled.
-    #[inline(never)]
-    fn calculate_f(k: usize, max_l: usize) -> Vec<f64> {
-        let n_kmer = 1i32 << (2 * k);
-        let dr = 1.0;
-        Self::calculate_f_internal(k, max_l, 1, &[n_kmer], &[dr])
-    }
-
-    // Calculates the DUST score adjustment table (f[L]) for all lengths L <= max_l.
-    // This version uses k-mer density ratios (dr) based on genome-wide GC content
-    // to adjust the expected scores, preventing over-masking of GC/AT-rich sequences.
-    // It relies on a summation for small lambda and f_large() for large lambda.
-    #[inline(never)]
-    fn calculate_f_gc(k: usize, max_l: usize, gc: f64) -> Vec<f64> {
-        let mut dr = vec![0.0f64; k + 1];
-        for (i, val) in dr.iter_mut().enumerate().take(k + 1) {
-            *val = (gc / 0.5).powi(i as i32) * ((1.0 - gc) / 0.5).powi((k - i) as i32);
-        }
-        // Each position is G/C in 2 of 4 letters, so C(k, i) * 2^k k-mers have exactly i G/C bases.
-        let mut n_dr = vec![0i32; k + 1];
-        let mut binomial = 1usize;
-        for (i, val) in n_dr.iter_mut().enumerate() {
-            *val = (binomial << k) as i32;
-            binomial = binomial * (k - i) / (i + 1);
-        }
-        Self::calculate_f_internal(k, max_l, k + 1, &n_dr, &dr)
-    }
-
-    #[inline(never)]
-    fn calculate_f_internal(
-        k: usize,
-        max_l: usize,
-        nn_dr: usize,
-        n_dr: &[i32],
-        dr: &[f64],
-    ) -> Vec<f64> {
-        let ln = ln_table();
-        let n_kmer = 1usize << (2 * k);
-        let mut f = vec![0.0f64; max_l + 1];
-        for (l, val) in f.iter_mut().enumerate().skip(1).take(max_l) {
-            let mut accum = 0.0f64;
-            for (dr_i, n_dr_i) in dr.iter().zip(n_dr.iter()).take(nn_dr) {
-                let lambda = (l as f64) / (n_kmer as f64) * dr_i;
-                let fli = if lambda < 30.0 {
-                    let mut x = 0.0f64;
-                    let mut sn = 0.0f64;
-                    let mut y = lambda;
-                    for (n, &ln_n) in ln.iter().enumerate().take(MAX_N + 1).skip(2) {
-                        sn += ln_n;
-                        y *= lambda / (n as f64);
-                        let z = y * sn;
-                        if z < x * f64::EPSILON {
-                            break;
-                        }
-                        x += z;
-                    }
-                    x * (-lambda).exp()
-                } else {
-                    Self::f_large(lambda)
-                };
-                accum += fli * (*n_dr_i as f64);
-            }
-            *val = accum;
-        }
-        f
     }
 }

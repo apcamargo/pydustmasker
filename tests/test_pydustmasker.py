@@ -207,6 +207,53 @@ def test_longdustmasker_gc_none_vs_auto():
     assert m2.intervals == ((7, 12), (34, 66), (76, 89))
 
 
+# AT-rich sequence with long A/T tracts, shared by the GC bias correction tests.
+GC_SEQ = "ATATTTATAAATTTAATATTAAAAAAAAAAAAGCTAGCTTTATAAATATTTTTTTTTATATGCAT"
+
+
+def test_longdustmasker_gc_half_equals_uniform():
+    # At 50% GC all k-mers are equally likely, so the GC-corrected expected-score
+    # table must reduce to the uniform one.
+    for kmer, score_threshold, window_size in ((1, 0.1, 32), (2, 0.1, 16), (2, 0.6, 32)):
+        uniform = LongdustMasker(
+            GC_SEQ, kmer=kmer, score_threshold=score_threshold, window_size=window_size
+        )
+        half = LongdustMasker(
+            GC_SEQ,
+            kmer=kmer,
+            score_threshold=score_threshold,
+            window_size=window_size,
+            gc=0.5,
+        )
+        assert uniform.intervals
+        assert half.intervals == uniform.intervals
+
+
+def test_longdustmasker_gc_correction_intervals():
+    # An A/T-rich background expects A/T-rich k-mers, so correcting for it masks
+    # less than the uniform model does.
+    cases = (
+        # kmer, score_threshold, window_size, gc, expected intervals
+        (1, 0.3, 32, 0.2, ((0, 32), (48, 57))),
+        (2, 0.3, 64, 0.2, ((0, 32), (38, 61))),
+        (3, 0.1, 32, "auto", ((0, 32), (48, 61))),
+    )
+    for kmer, score_threshold, window_size, gc, expected in cases:
+        uniform = LongdustMasker(
+            GC_SEQ, kmer=kmer, score_threshold=score_threshold, window_size=window_size
+        )
+        corrected = LongdustMasker(
+            GC_SEQ,
+            kmer=kmer,
+            score_threshold=score_threshold,
+            window_size=window_size,
+            gc=gc,
+        )
+        assert corrected.intervals == expected
+        assert uniform.intervals != expected
+        assert corrected.n_masked_bases < uniform.n_masked_bases
+
+
 def test_longdustmasker_forward_only():
     seq = "ACAGAAAAATGCGTACCCATCCACCTTTCAGTGCGTACCCACCCATCCACCTTTCAGTGCGTACCCATCCACCTTTCATTT"
     m1 = LongdustMasker(seq, forward_only=False, score_threshold=0.1, window_size=64)
