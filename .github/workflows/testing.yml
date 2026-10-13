@@ -79,3 +79,6 @@ jobs:
           maturin build --out dist
       - name: Test with pytest
         run: pytest
+
+  testing-pyodide:
+    uses: ./.github/workflows/pyodide.yml

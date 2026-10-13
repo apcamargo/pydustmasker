@@ -127,6 +127,11 @@ jobs:
           name: wheels-macos-${{ matrix.platform.target }}
           path: dist
 
+  pyodide:
+    uses: ./.github/workflows/pyodide.yml
+    with:
+      upload-artifact: true
+
   sdist:
     runs-on: ubuntu-latest
     steps:
@@ -149,7 +154,7 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
-    needs: [linux, musllinux, windows, macos, sdist]
+    needs: [linux, musllinux, windows, macos, pyodide, sdist]
     permissions:
       id-token: write
       contents: write
