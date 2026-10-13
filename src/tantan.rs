@@ -1367,28 +1367,30 @@ impl TractAccumulator {
     }
 }
 
+/// Options for tantan
 #[derive(Debug, Clone, Copy)]
 pub struct TantanOptions {
     pub alphabet: Alphabet,
-    // Background probability of starting a repeat, per position.
+    /// Background probability of starting a repeat, per position.
     pub repeat_start: f64,
-    // Probability of ending a repeat, per position.
+    /// Probability of ending a repeat, per position.
     pub repeat_end: f64,
-    // Geometric decay of the repeat-start probability with period (1.0 = none).
+    /// Geometric decay of the repeat-start probability with period (1.0 = none).
     pub decay: f64,
-    // Maximum tandem repeat period (repeat unit length) to consider.
+    /// Maximum tandem repeat period (repeat unit length) to consider.
     pub max_period: usize,
-    // Gap-open (existence) cost.
+    /// Gap-open (existence) cost.
     pub gap_open: u32,
-    // Gap-extend (per-letter) cost. None disables gaps.
+    /// Gap-extend (per-letter) cost. None disables gaps.
     pub gap_extend: Option<u32>,
-    // Posterior-repeat probability threshold for masking.
+    /// Posterior-repeat probability threshold for masking.
     pub score_threshold: f64,
-    // Minimum copy number for a tract to be reported by repeat_units().
+    /// Minimum copy number for a tract to be reported by repeat_units().
     pub min_copy_number: f64,
 }
 
 impl TantanOptions {
+    /// Returns `(first_gap_prob, other_gap_prob)`, or `(0.0, 0.0)` when gaps are disabled.
     pub fn gap_probabilities(&self) -> (f64, f64) {
         let Some(extend_cost) = self.gap_extend else {
             return (0.0, 0.0);
@@ -1415,6 +1417,7 @@ pub struct RepeatTract {
     pub copy_number: f64,
 }
 
+/// The main structure for the tantan algorithm execution.
 #[derive(Debug)]
 pub struct Tantan {
     options: TantanOptions,

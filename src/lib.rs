@@ -325,7 +325,7 @@ impl BaseMasker {
     /// ----------
     /// hard : bool, default: False
     ///     If True, low-complexity regions will be masked with 'N' (for
-    ///     nucleotide sequences) or 'X' (for protein sequences). By default,
+    ///     nucleotide sequences) or 'X' (for protein sequences). Otherwise,
     ///     residues within low-complexity regions are converted to lowercase
     ///     (i.e., soft-masking).
     ///
@@ -483,7 +483,7 @@ impl DustMasker {
 ///     composition. If 'auto', compute the GC content from the unambiguous bases
 ///     ('A', 'C', 'G', and 'T', case-insensitive) of the input sequence, or use 0.0
 ///     if there are none. If a float, it must be between 0.0 and 1.0.
-/// xdrop : int or None, optional
+/// xdrop : int or None, default: 50
 ///     Maximum allowable score drop for X-drop extension termination. During
 ///     backward scanning, extension continues while (max_score - current_score)
 ///     does not exceed (score_threshold * xdrop). Once the score drops by more
@@ -491,8 +491,7 @@ impl DustMasker {
 ///     stops immediately. Lower values enforce stricter extensions and tighter
 ///     boundaries, potentially truncating part of the low-complexity region, whereas
 ///     higher values allow more permissive extensions and looser boundaries, which
-///     may include non-low-complexity regions. The default is 50. If set to None,
-///     X-drop is disabled.
+///     may include non-low-complexity regions. If set to None, X-drop is disabled.
 /// min_start_cnt : int, default: 3
 ///     Minimum k-mer frequency to start a backward scan. Must be in [2, 65535].
 ///     Lower values are more sensitive but slower.
@@ -502,7 +501,7 @@ impl DustMasker {
 ///     during backward scanning, rather than checking all candidates to find
 ///     the optimal one.
 /// forward_only : bool, default: False
-///     If True, only process the forward strand. By default, both strands are processed.
+///     If True, only process the forward strand. Otherwise, both strands are processed.
 ///
 /// Attributes
 /// ----------

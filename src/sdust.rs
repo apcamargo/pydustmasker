@@ -4,6 +4,9 @@ use crate::common::encode_sequence;
 use std::collections::VecDeque;
 use std::ops::Range;
 
+// Mask for triplet extraction (63 = 0b111111)
+const MASK: u8 = 63;
+
 #[derive(Debug)]
 struct PerfectInterval {
     start: usize,
@@ -12,14 +15,14 @@ struct PerfectInterval {
     l: usize,
 }
 
-// Options for SymmetricDust
+/// Options for SymmetricDust
 #[derive(Debug, Clone, Copy)]
 pub struct SymmetricDustOptions {
-    // The length of the window used by symmetric DUST algorithm.
-    // `W` in the paper.
+    /// The length of the window used by symmetric DUST algorithm.
+    /// `W` in the paper.
     pub window_size: usize,
-    // 10 times the score threshold used by symmetric DUST algorithm.
-    // `T` in the paper.
+    /// 10 times the score threshold used by symmetric DUST algorithm.
+    /// `T` in the paper.
     pub score_threshold: usize,
 }
 
@@ -35,29 +38,31 @@ impl Default for SymmetricDustOptions {
     }
 }
 
-// The main structure for the Symmetric DUST algorithm execution.
+/// The main structure for the Symmetric DUST algorithm execution.
 #[derive(Debug)]
 pub struct SymmetricDust {
-    // Parameters struct
+    /// Parameters struct
     options: SymmetricDustOptions,
-    // `P` in the paper - stores detected intervals that meet the criteria
+    /// `P` in the paper - stores detected intervals that meet the criteria
     perfect_intervals: VecDeque<PerfectInterval>,
-    // `res` in the paper - the final, merged results
+    /// `res` in the paper - the final, merged results
     results: Vec<Range<usize>>,
-    // `w` in the paper - the sliding window of triplets
+    /// `w` in the paper - the sliding window of triplets
     window: VecDeque<usize>,
-    // counts in the current window
+    /// Triplet counts in `v`, the suffix of `w` kept free of triplets with count > 2*T/10
     cv: [usize; 64],
+    /// Triplet counts in the window `w`
     cw: [usize; 64],
-    // runnings counts
+    /// Running score of `v`: sum of c*(c-1)/2 over the counts in `cv`
     rv: usize,
+    /// Running score of `w`: sum of c*(c-1)/2 over the counts in `cw`
     rw: usize,
-    // `L` in the paper - The biggest number of triplets whose count is <= 2*T/10
+    /// `L` in the paper - The biggest number of triplets whose count is <= 2*T/10
     biggest_num_triplets: usize,
 }
 
 impl SymmetricDust {
-    // Initialize and run the SymmetricDust algorithm on the input sequence
+    /// Initialize and run the SymmetricDust algorithm on the input sequence
     pub fn process(sequence: &[u8], options: SymmetricDustOptions) -> Vec<(usize, usize)> {
         let mut obj = SymmetricDust {
             options,
@@ -82,8 +87,6 @@ impl SymmetricDust {
     }
 
     fn inner_process(&mut self, encoded_seq: &[u8]) {
-        // Mask for triplet extraction (63 = 0b111111)
-        const MASK: u8 = 63;
         let mut triplet: u8 = 0;
         let mut l: usize = 0;
 

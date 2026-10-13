@@ -114,35 +114,35 @@ struct ForwardPosition {
     max_score: f64,
 }
 
-// Handling the GC parameter
+/// Handling the GC parameter
 #[derive(Debug, Clone, Copy)]
 pub enum GcOption {
-    // Use uniform distribution (no GC bias correction)
+    /// Use uniform distribution (no GC bias correction)
     Uniform,
-    // Use fixed GC value for bias correction
+    /// Use fixed GC value for bias correction
     Fixed(f64),
-    // Compute GC from the unambiguous bases of the input sequence
+    /// Compute GC from the unambiguous bases of the input sequence
     Auto,
 }
 
-// Options for Longdust
+/// Options for Longdust
 #[derive(Debug, Clone, Copy)]
 pub struct LongdustOptions {
-    // The size of the sliding window
+    /// The size of the sliding window
     pub window_size: usize,
-    // Score threshold for identifying low-complexity regions
+    /// Score threshold for identifying low-complexity regions
     pub score_threshold: f64,
-    // The k-mer size used by the Longdust algorithm
+    /// The k-mer size used by the Longdust algorithm
     pub kmer: usize,
-    // GC content handling mode
+    /// GC content handling mode
     pub gc: GcOption,
-    // X-drop extension length: None=disabled (use full window), Some(n)=limit to n
+    /// X-drop extension length: None=disabled (use full window), Some(n)=limit to n
     pub xdrop: Option<usize>,
-    // Minimum k-mer count to trigger backward scan
+    /// Minimum k-mer count to trigger backward scan
     pub min_start_cnt: u16,
-    // Use approximate mode (faster but less accurate)
+    /// Use approximate mode (faster but less accurate)
     pub approx: bool,
-    // Only scan forward strand (skip reverse complement)
+    /// Only scan forward strand (skip reverse complement)
     pub forward_only: bool,
 }
 
@@ -161,38 +161,39 @@ impl Default for LongdustOptions {
     }
 }
 
+/// The main structure for the Longdust algorithm execution.
 #[derive(Debug)]
 pub struct Longdust {
-    // Parameters struct
+    /// Parameters struct
     options: LongdustOptions,
-    // `f[L]`: precomputed expected score for random sequence of length L,
-    // subtracted from raw score to normalize for statistical significance
+    /// `f[L]`: precomputed expected score for random sequence of length L,
+    /// subtracted from raw score to normalize for statistical significance
     f: Vec<f64>,
-    // `c[i] = ln(i)` for i <= window_size, borrowed from the shared ln table, for
-    // efficient ln(count!) computation. `c[0] = -inf` is never read: every lookup
-    // uses a count >= 1.
+    /// `c[i] = ln(i)` for i <= window_size, borrowed from the shared ln table, for
+    /// efficient ln(count!) computation. `c[0] = -inf` is never read: every lookup
+    /// uses a count >= 1.
     c: &'static [f64],
-    // Sliding window queue of encoded k-mers (VecDeque for O(1) push_back/pop_front)
-    // Each element: (kmer_value << 1) | ambiguous_flag
+    /// Sliding window queue of encoded k-mers (VecDeque for O(1) push_back/pop_front)
+    /// Each element: (kmer_value << 1) | ambiguous_flag
     window: VecDeque<u32>,
-    // K-mer count hash tables (size = 4^kmer, preallocated for reuse)
-    // ht: temporary count table used during backward/forward scans to track
-    // k-mer occurrences within the current scan window
+    /// K-mer count hash tables (size = 4^kmer, preallocated for reuse)
+    /// ht: temporary count table used during backward/forward scans to track
+    /// k-mer occurrences within the current scan window
     ht: Vec<u16>,
-    // window_ht: count table tracking k-mer occurrences in the sliding window,
-    // maintained incrementally as the window advances
+    /// window_ht: count table tracking k-mer occurrences in the sliding window,
+    /// maintained incrementally as the window advances
     window_ht: Vec<u16>,
-    // max_test: maximum number of steps to check in `if_backward()` heuristic,
-    // limiting how far back we look before deciding to trigger a full backward scan
+    /// max_test: maximum number of steps to check in `if_backward()` heuristic,
+    /// limiting how far back we look before deciding to trigger a full backward scan
     max_test: i32,
-    // Temp for forward candidate positions
+    /// Temp for forward candidate positions
     for_pos: Vec<ForwardPosition>,
-    // Output intervals
+    /// Output intervals
     results: Vec<Range<usize>>,
 }
 
 impl Longdust {
-    // Initialize and run the Longdust algorithm on the input sequence.
+    /// Initialize and run the Longdust algorithm on the input sequence.
     pub fn process(sequence: &[u8], options: LongdustOptions) -> Vec<(usize, usize)> {
         // Encode sequence
         let encoded_seq = encode_sequence(sequence);
