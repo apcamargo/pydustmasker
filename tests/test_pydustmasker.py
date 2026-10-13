@@ -265,6 +265,50 @@ def test_longdustmasker_gc_auto_ignores_ambiguous_bases():
     assert auto.intervals != uniform.intervals
 
 
+# GC_SEQ with every G/C replaced by A/T, so its GC content is exactly 0.0.
+AT_SEQ = GC_SEQ.translate(str.maketrans("GC", "AT"))
+
+
+def test_longdustmasker_extreme_gc():
+    # The GC-corrected expected-score table is the same for gc and 1 - gc, and at
+    # 0.0 or 1.0 only one class of k-mers has a non-zero expected count.
+    cases = (
+        # seq, kmer, score_threshold, window_size, expected intervals
+        (GC_SEQ, 1, 0.1, 32, ((3, 6), (8, 14), (20, 32), (38, 41), (43, 46), (48, 57))),
+        (GC_SEQ, 2, 0.3, 32, ((20, 32), (48, 57))),
+        (AT_SEQ, 1, 0.1, 32, ((3, 6), (8, 14), (20, 33), (37, 41), (43, 46), (48, 57))),
+    )
+    for seq, kmer, score_threshold, window_size, expected in cases:
+        uniform = LongdustMasker(
+            seq, kmer=kmer, score_threshold=score_threshold, window_size=window_size
+        )
+        assert uniform.intervals != expected
+        for gc in (0.0, 1.0):
+            masker = LongdustMasker(
+                seq,
+                kmer=kmer,
+                score_threshold=score_threshold,
+                window_size=window_size,
+                gc=gc,
+            )
+            assert masker.intervals == expected
+
+
+def test_longdustmasker_gc_auto_extreme_composition():
+    # gc="auto" computes 0.0 for a sequence with only A/T and 1.0 for one with
+    # only G/C, which give the same score table.
+    expected = ((3, 6), (8, 14), (20, 33), (37, 41), (43, 46), (48, 57))
+    gc_only = AT_SEQ.translate(str.maketrans("AT", "CG"))
+    for seq in (AT_SEQ, gc_only):
+        masker = LongdustMasker(
+            seq, kmer=1, score_threshold=0.1, window_size=32, gc="auto"
+        )
+        assert masker.intervals == expected
+    # Without unambiguous bases there are no k-mers, so nothing is masked.
+    for gc in (None, 0.0, "auto"):
+        assert LongdustMasker("N" * 16, kmer=1, window_size=32, gc=gc).intervals == ()
+
+
 def test_longdustmasker_gc_auto_case_insensitive():
     # Lowercase g/c count toward the GC content computed by gc="auto".
     seq = GC_SEQ.translate(str.maketrans("GC", "gc"))

@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `LongdustMasker` with `gc="auto"` now excludes ambiguous bases (such as `N`) when computing GC content. Previously they diluted the estimate toward 0.
+- `LongdustMasker` no longer stalls while building its score table when `gc` is 0.0 or 1.0, or when `gc="auto"` finds a sequence with only A/T, only G/C, or no unambiguous bases. With the largest window and k-mer size, construction took several seconds.
 
 ## [3.2.0] - 2026-07-19
 ### Added

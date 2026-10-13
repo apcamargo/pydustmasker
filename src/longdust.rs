@@ -87,7 +87,11 @@ fn calculate_f_internal(k: usize, max_l: usize, n_dr: &[f64], dr: &[f64]) -> Vec
                     sn += ln_n;
                     y *= lambda / (n as f64);
                     let z = y * sn;
-                    if z < x * f64::EPSILON {
+                    // `<=` (upstream uses `<`) also stops when a term is exactly zero:
+                    // a zero-density class (gc = 0 or 1) or terms that underflow (gc
+                    // within ~1e-13 of 0 or 1). Such classes then add exactly 0 after
+                    // one step, where `<` would run all MAX_N steps.
+                    if z <= x * f64::EPSILON {
                         break;
                     }
                     x += z;
