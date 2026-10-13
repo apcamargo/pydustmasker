@@ -254,6 +254,26 @@ def test_longdustmasker_gc_correction_intervals():
         assert corrected.n_masked_bases < uniform.n_masked_bases
 
 
+def test_longdustmasker_gc_auto_ignores_ambiguous_bases():
+    # Ambiguous bases must not dilute the GC content computed by gc="auto".
+    seq = GC_SEQ + "N" * 200
+    gc = (GC_SEQ.count("G") + GC_SEQ.count("C")) / len(GC_SEQ)
+    uniform = LongdustMasker(seq, kmer=3, score_threshold=0.1, window_size=32)
+    auto = LongdustMasker(seq, kmer=3, score_threshold=0.1, window_size=32, gc="auto")
+    fixed = LongdustMasker(seq, kmer=3, score_threshold=0.1, window_size=32, gc=gc)
+    assert auto.intervals == fixed.intervals
+    assert auto.intervals != uniform.intervals
+
+
+def test_longdustmasker_gc_auto_case_insensitive():
+    # Lowercase g/c count toward the GC content computed by gc="auto".
+    seq = GC_SEQ.translate(str.maketrans("GC", "gc"))
+    auto = LongdustMasker(seq, kmer=1, score_threshold=0.1, window_size=32, gc="auto")
+    zero = LongdustMasker(seq, kmer=1, score_threshold=0.1, window_size=32, gc=0.0)
+    assert auto.intervals == ((0, 32), (38, 61))
+    assert zero.intervals != auto.intervals
+
+
 def test_longdustmasker_forward_only():
     seq = "ACAGAAAAATGCGTACCCATCCACCTTTCAGTGCGTACCCACCCATCCACCTTTCAGTGCGTACCCATCCACCTTTCATTT"
     m1 = LongdustMasker(seq, forward_only=False, score_threshold=0.1, window_size=64)

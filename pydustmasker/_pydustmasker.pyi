@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import overload
+from typing import Literal, overload
 
 __version__: str
 
@@ -134,10 +134,11 @@ class LongdustMasker(_BaseMasker):
     kmer : int, default: 7
         The k-mer length used by the Longdust algorithm. Must be in the range
         [1, 12].
-    gc : float or {'auto', None}, optional
+    gc : {None, 'auto'} or float, optional
         GC content for bias correction. If None (default), assume a uniform base
-        composition. If 'auto', compute the GC content from the input sequence.
-        If a float, it must be between 0.0 and 1.0.
+        composition. If 'auto', compute the GC content from the unambiguous bases
+        ('A', 'C', 'G', and 'T', case-insensitive) of the input sequence, or use 0.0
+        if there are none. If a float, it must be between 0.0 and 1.0.
     xdrop : int or None, optional
         Maximum allowable score drop for X-drop extension termination. During
         backward scanning, extension continues while (max_score - current_score)
@@ -169,10 +170,10 @@ class LongdustMasker(_BaseMasker):
         Score threshold for determining low-complexity regions.
     kmer : int
         k-mer length.
-    gc : float or {'auto', None}
+    gc : {None, 'auto'} or float
         Option used for GC bias correction. Can be None (a uniform base composition
-        was assumed), 'auto' (GC was computed from the input sequence), or a float
-        between 0.0 and 1.0 (provided by the user).
+        was assumed), 'auto' (GC was computed from the unambiguous bases of the
+        input sequence), or a float between 0.0 and 1.0 (provided by the user).
     xdrop : int or None
         Multiplier used to derive the X-drop extension threshold.
     min_start_cnt : int
@@ -215,7 +216,7 @@ class LongdustMasker(_BaseMasker):
     window_size: int
     score_threshold: float
     kmer: int
-    gc: float | str | None
+    gc: float | Literal["auto"] | None
     xdrop: int | None
     min_start_cnt: int
     approx: bool
@@ -227,7 +228,7 @@ class LongdustMasker(_BaseMasker):
         window_size: int = 5000,
         score_threshold: float = 0.6,
         kmer: int = 7,
-        gc: float | str | None = None,
+        gc: float | Literal["auto"] | None = None,
         xdrop: int | None = 50,
         min_start_cnt: int = 3,
         approx: bool = False,

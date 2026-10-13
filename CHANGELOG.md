@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SIMD-generic functions now use the `#[simd]` attribute from `fearless_simd_macros` instead of manual `#[inline(always)]`.
 - `LongdustMasker` now reuses a shared logarithm table and computes per-GC k-mer counts in closed form when building its score table.
 
+### Fixed
+- `LongdustMasker` with `gc="auto"` now excludes ambiguous bases (such as `N`) when computing GC content. Previously they diluted the estimate toward 0.
+
 ## [3.2.0] - 2026-07-19
 ### Added
 - Added an optional `period` argument to `repeat_units()` to return consensus repeat units for a specified period present in the decoded Viterbi path.

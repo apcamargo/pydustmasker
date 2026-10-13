@@ -92,12 +92,18 @@ pub fn decode_sequence(encoded: &[u8], alphabet: Alphabet) -> String {
     encoded.iter().map(|&b| table[b as usize] as char).collect()
 }
 
-// Compute GC content from an encoded sequence.
-// Returns a value between 0.0 and 1.0. Returns 0.0 if the sequence is empty.
+/// Compute GC content from an encoded sequence, ignoring ambiguous bases.
+/// Returns a value between 0.0 and 1.0. Returns 0.0 if the sequence has no
+/// unambiguous bases.
 pub fn compute_gc_content(encoded_seq: &[u8]) -> f64 {
-    if encoded_seq.is_empty() {
+    let (acgt_count, gc_count) = encoded_seq.iter().fold((0usize, 0usize), |(acgt, gc), &b| {
+        (
+            acgt + usize::from(b < 4),
+            gc + usize::from(b == 1 || b == 2),
+        )
+    });
+    if acgt_count == 0 {
         return 0.0;
     }
-    let gc_count = encoded_seq.iter().filter(|&&b| b == 1 || b == 2).count();
-    gc_count as f64 / encoded_seq.len() as f64
+    gc_count as f64 / acgt_count as f64
 }

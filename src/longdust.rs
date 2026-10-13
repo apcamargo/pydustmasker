@@ -117,7 +117,7 @@ pub enum GcOption {
     Uniform,
     // Use fixed GC value for bias correction
     Fixed(f64),
-    // Compute GC from the input sequence
+    // Compute GC from the unambiguous bases of the input sequence
     Auto,
 }
 
