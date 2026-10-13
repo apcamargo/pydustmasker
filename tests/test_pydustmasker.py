@@ -380,6 +380,16 @@ def test_tantanmasker_masking_protein():
     assert m2.mask(hard=True) == "ACXXXXXXXXXXXX"
 
 
+def test_tantanmasker_protein_gapped():
+    # Gap costs are converted to probabilities with the lambda of the alphabet's
+    # substitution matrix, which is different for protein and DNA.
+    seq = "MKVLAMKVLAMKVLAGMKVLAMKVLAMKVLA"
+    m1 = TantanMasker(seq, protein=True)
+    m2 = TantanMasker(seq, protein=True, gap_open=7, gap_extend=1)
+    assert m1.intervals == ((5, 31),)
+    assert m2.intervals == ((6, 30),)
+
+
 def test_tantanmasker_repeat_units():
     assert TantanMasker("ACACACACACACAC").repeat_units() == (("AC", 0, 14, 7.0),)
     assert TantanMasker("ACGTACGTACGTACGTACGT").repeat_units() == (("ACGT", 0, 20, 5.0),)
@@ -398,6 +408,17 @@ def test_tantanmasker_repeat_units_period():
     assert masker.repeat_units(period=3) == (("GCA", 20, 50, 10.0),)
     assert masker.repeat_units(period=4) == ()
     assert masker.repeat_units(None) == masker.repeat_units()
+
+
+def test_tantanmasker_repeat_units_protein():
+    seq = "MKV" * 5
+    masker = TantanMasker(seq, protein=True)
+    assert masker.repeat_units() == (("MKV", 0, 15, 5.0),)
+    assert masker.repeat_units(period=3) == (("MKV", 0, 15, 5.0),)
+    assert masker.repeat_units(period=5) == ()
+    # M, K and V are ambiguous letters for DNA, so there is nothing to repeat.
+    assert TantanMasker(seq).repeat_units() == ()
+    assert TantanMasker(seq).repeat_units(period=3) == ()
 
 
 def test_tantanmasker_repeat_units_period_with_gaps():
@@ -519,6 +540,26 @@ def test_tantanmasker_repeat_units_min_copy_number():
     m2 = TantanMasker(seq, min_copy_number=10.0)
     assert m1.repeat_units() == (("AC", 0, 14, 7.0),)
     assert m2.repeat_units() == ()
+
+
+def test_tantanmasker_repeat_units_min_copy_number_threshold():
+    # The threshold is inclusive and applies per tract, with or without a period.
+    seq = "AT" * 10 + "GCA" * 5
+    at = ("AT", 0, 20, 10.0)
+    gca = ("GCA", 20, 35, 5.0)
+    cases = (
+        # min_copy_number, all tracts, period=2, period=3
+        (2.0, (at, gca), (at,), (gca,)),
+        (5.0, (at, gca), (at,), (gca,)),
+        (5.5, (at,), (at,), ()),
+        (10.0, (at,), (at,), ()),
+        (10.5, (), (), ()),
+    )
+    for min_copy_number, expected, expected_period_2, expected_period_3 in cases:
+        masker = TantanMasker(seq, min_copy_number=min_copy_number)
+        assert masker.repeat_units() == expected
+        assert masker.repeat_units(period=2) == expected_period_2
+        assert masker.repeat_units(period=3) == expected_period_3
 
 
 def test_tantanmasker_repr():

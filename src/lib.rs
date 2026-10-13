@@ -943,7 +943,7 @@ impl TantanMasker {
         match period {
             None => {
                 let tracts = slf.repeat_units.get_or_init(|| {
-                    Tantan::repeat_units(slf.as_super().sequence.as_bytes(), slf.options)
+                    Tantan::repeat_units(slf.as_super().sequence.as_bytes(), slf.options, None)
                 });
                 repeat_tracts_to_tuple(py, tracts, alphabet)
             }
@@ -965,10 +965,10 @@ impl TantanMasker {
                     )
                 };
                 let tracts = cache_entry.get_or_init(|| {
-                    Tantan::repeat_units_for_period(
+                    Tantan::repeat_units(
                         slf.as_super().sequence.as_bytes(),
                         slf.options,
-                        period,
+                        Some(period),
                     )
                 });
                 repeat_tracts_to_tuple(py, tracts, alphabet)

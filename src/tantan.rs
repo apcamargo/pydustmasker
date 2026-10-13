@@ -10,6 +10,8 @@ const PROTEIN_SIZE: usize = 20;
 // SIMD lookups in bounds.
 const MATRIX_STRIDE: usize = (PROTEIN_SIZE + 1).next_power_of_two();
 
+const SCALE_STEP_SIZE: usize = 16;
+
 // Match/mismatch matrix for A, C, G, T (match +1, mismatch -1), indexed by the
 // encoded letter (0..4).
 const DNA_MATCH_MISMATCH: [[i32; DNA_SIZE]; DNA_SIZE] = [
@@ -174,6 +176,72 @@ fn calculate_lambda(matrix: &[Vec<f64>]) -> f64 {
     }
 }
 
+// Widens a fixed-size integer score matrix into the Vec<Vec<f64>> shape the
+// lambda solver works in.
+fn to_f64_rows<const N: usize>(matrix: &[[i32; N]; N]) -> Vec<Vec<f64>> {
+    matrix
+        .iter()
+        .map(|row| row.iter().map(|&v| f64::from(v)).collect())
+        .collect()
+}
+
+// Adds an ambiguous row and pads columns with its worst transformed score.
+fn expand_matrix(scores: &[Vec<f64>], transform: impl Fn(f64) -> f64) -> Matrix {
+    let size = scores.len();
+    let min_score = scores.iter().flatten().copied().fold(f64::MAX, f64::min);
+    let ambiguous = transform(min_score);
+
+    let mut values = Vec::with_capacity(size + 1);
+    for row in scores {
+        let mut expanded = [ambiguous; MATRIX_STRIDE];
+        for (&score, destination) in row.iter().zip(&mut expanded) {
+            *destination = transform(score);
+        }
+        values.push(expanded);
+    }
+    values.push([ambiguous; MATRIX_STRIDE]);
+    Matrix { values }
+}
+
+// Background-to-foreground transition probability for offset `max_period`,
+// given the per-step decay.
+fn repeat_offset_prob(prob_mult: f64, max_period: usize) -> f64 {
+    if prob_mult != 1.0 {
+        (1.0 - prob_mult) / (1.0 - prob_mult.powi(max_period as i32))
+    } else {
+        1.0 / max_period as f64
+    }
+}
+
+// How many repeat periods `pos` can look back over: every period up to
+// `max_period`, until the start of the sequence cuts it short.
+fn max_offset_in_sequence(pos: usize, max_period: usize) -> usize {
+    pos.min(max_period)
+}
+
+fn simd_level() -> Level {
+    static LEVEL: OnceLock<Level> = OnceLock::new();
+    *LEVEL.get_or_init(Level::new)
+}
+
+// Round before subtracting so exact-zero posteriors remain exactly zero.
+#[inline(always)]
+fn repeat_posterior(forward_background: f32, backward_background: f64, total: f64) -> f32 {
+    (1.0 - (forward_background as f64 * backward_background / total) as f32).clamp(0.0, 1.0)
+}
+
+fn log_safe(x: f64) -> f64 {
+    if x > 0.0 {
+        x.ln()
+    } else {
+        f64::NEG_INFINITY
+    }
+}
+
+fn max3(x: f64, y: f64, z: f64) -> f64 {
+    x.max(y).max(z)
+}
+
 struct Matrix {
     values: Vec<[f64; MATRIX_STRIDE]>,
 }
@@ -226,126 +294,6 @@ fn tables(alphabet: Alphabet) -> &'static Tables {
             log_odds,
         }
     })
-}
-
-// Widens a fixed-size integer score matrix into the Vec<Vec<f64>> shape the
-// lambda solver works in.
-fn to_f64_rows<const N: usize>(matrix: &[[i32; N]; N]) -> Vec<Vec<f64>> {
-    matrix
-        .iter()
-        .map(|row| row.iter().map(|&v| f64::from(v)).collect())
-        .collect()
-}
-
-// Adds an ambiguous row and pads columns with its worst transformed score.
-fn expand_matrix(scores: &[Vec<f64>], transform: impl Fn(f64) -> f64) -> Matrix {
-    let size = scores.len();
-    let min_score = scores.iter().flatten().copied().fold(f64::MAX, f64::min);
-    let ambiguous = transform(min_score);
-
-    let mut values = Vec::with_capacity(size + 1);
-    for row in scores {
-        let mut expanded = [ambiguous; MATRIX_STRIDE];
-        for (&score, destination) in row.iter().zip(&mut expanded) {
-            *destination = transform(score);
-        }
-        values.push(expanded);
-    }
-    values.push([ambiguous; MATRIX_STRIDE]);
-    Matrix { values }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct TantanOptions {
-    pub alphabet: Alphabet,
-    // Background probability of starting a repeat, per position.
-    pub repeat_start: f64,
-    // Probability of ending a repeat, per position.
-    pub repeat_end: f64,
-    // Geometric decay of the repeat-start probability with period (1.0 = none).
-    pub decay: f64,
-    // Maximum tandem repeat period (repeat unit length) to consider.
-    pub max_period: usize,
-    // Gap-open (existence) cost.
-    pub gap_open: u32,
-    // Gap-extend (per-letter) cost. None disables gaps.
-    pub gap_extend: Option<u32>,
-    // Posterior-repeat probability threshold for masking.
-    pub score_threshold: f64,
-    // Minimum copy number for a tract to be reported by repeat_units().
-    pub min_copy_number: f64,
-}
-
-impl TantanOptions {
-    pub fn gap_probabilities(&self) -> (f64, f64) {
-        let Some(extend_cost) = self.gap_extend else {
-            return (0.0, 0.0);
-        };
-        let lambda = tables(self.alphabet).lambda;
-        let first_gap_cost = (u64::from(self.gap_open) + u64::from(extend_cost)) as f64;
-        let other_gap_prob = (-lambda * extend_cost as f64).exp();
-        // The gap-existence cost includes the gap-ending cost.
-        let first_gap_prob = (-lambda * first_gap_cost).exp() / (1.0 - other_gap_prob);
-        (first_gap_prob, other_gap_prob)
-    }
-
-    // A gap needs a nonzero opening probability and a period greater than one.
-    fn has_gaps(&self, first_gap_prob: f64) -> bool {
-        first_gap_prob > 0.0 && self.max_period > 1
-    }
-}
-
-// Background-to-foreground transition probability for offset `max_period`,
-// given the per-step decay.
-fn repeat_offset_prob(prob_mult: f64, max_period: usize) -> f64 {
-    if prob_mult != 1.0 {
-        (1.0 - prob_mult) / (1.0 - prob_mult.powi(max_period as i32))
-    } else {
-        1.0 / max_period as f64
-    }
-}
-
-pub fn probabilities_to_intervals(probabilities: &[f32], threshold: f64) -> Vec<(usize, usize)> {
-    let mut intervals = Vec::new();
-    let mut start: Option<usize> = None;
-    for (i, &p) in probabilities.iter().enumerate() {
-        if p as f64 >= threshold {
-            start.get_or_insert(i);
-        } else if let Some(s) = start.take() {
-            intervals.push((s, i));
-        }
-    }
-    if let Some(s) = start {
-        intervals.push((s, probabilities.len()));
-    }
-    intervals
-}
-
-#[derive(Debug)]
-pub struct RepeatTract {
-    pub unit: Vec<u8>,
-    pub start: usize,
-    pub end: usize,
-    pub copy_number: f64,
-}
-
-const SCALE_STEP_SIZE: usize = 16;
-
-// How many repeat periods `pos` can look back over: every period up to
-// `max_period`, until the start of the sequence cuts it short.
-fn max_offset_in_sequence(pos: usize, max_period: usize) -> usize {
-    pos.min(max_period)
-}
-
-fn simd_level() -> Level {
-    static LEVEL: OnceLock<Level> = OnceLock::new();
-    *LEVEL.get_or_init(Level::new)
-}
-
-// Round before subtracting so exact-zero posteriors remain exactly zero.
-#[inline(always)]
-fn repeat_posterior(forward_background: f32, backward_background: f64, total: f64) -> f32 {
-    (1.0 - (forward_background as f64 * backward_background / total) as f32).clamp(0.0, 1.0)
 }
 
 // Transition probabilities shared by both decoders (the Viterbi decoder takes
@@ -789,18 +737,6 @@ impl ViterbiState {
             ViterbiState::Insertion(period) => max_period + period,
         }
     }
-}
-
-fn log_safe(x: f64) -> f64 {
-    if x > 0.0 {
-        x.ln()
-    } else {
-        f64::NEG_INFINITY
-    }
-}
-
-fn max3(x: f64, y: f64, z: f64) -> f64 {
-    x.max(y).max(z)
 }
 
 struct ViterbiHmm<'a> {
@@ -1431,6 +1367,54 @@ impl TractAccumulator {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct TantanOptions {
+    pub alphabet: Alphabet,
+    // Background probability of starting a repeat, per position.
+    pub repeat_start: f64,
+    // Probability of ending a repeat, per position.
+    pub repeat_end: f64,
+    // Geometric decay of the repeat-start probability with period (1.0 = none).
+    pub decay: f64,
+    // Maximum tandem repeat period (repeat unit length) to consider.
+    pub max_period: usize,
+    // Gap-open (existence) cost.
+    pub gap_open: u32,
+    // Gap-extend (per-letter) cost. None disables gaps.
+    pub gap_extend: Option<u32>,
+    // Posterior-repeat probability threshold for masking.
+    pub score_threshold: f64,
+    // Minimum copy number for a tract to be reported by repeat_units().
+    pub min_copy_number: f64,
+}
+
+impl TantanOptions {
+    pub fn gap_probabilities(&self) -> (f64, f64) {
+        let Some(extend_cost) = self.gap_extend else {
+            return (0.0, 0.0);
+        };
+        let lambda = tables(self.alphabet).lambda;
+        let first_gap_cost = (u64::from(self.gap_open) + u64::from(extend_cost)) as f64;
+        let other_gap_prob = (-lambda * extend_cost as f64).exp();
+        // The gap-existence cost includes the gap-ending cost.
+        let first_gap_prob = (-lambda * first_gap_cost).exp() / (1.0 - other_gap_prob);
+        (first_gap_prob, other_gap_prob)
+    }
+
+    // A gap needs a nonzero opening probability and a period greater than one.
+    fn has_gaps(&self, first_gap_prob: f64) -> bool {
+        first_gap_prob > 0.0 && self.max_period > 1
+    }
+}
+
+#[derive(Debug)]
+pub struct RepeatTract {
+    pub unit: Vec<u8>,
+    pub start: usize,
+    pub end: usize,
+    pub copy_number: f64,
+}
+
 #[derive(Debug)]
 pub struct Tantan {
     options: TantanOptions,
@@ -1439,6 +1423,20 @@ pub struct Tantan {
 }
 
 impl Tantan {
+    pub fn probabilities(sequence: &[u8], options: TantanOptions) -> Vec<f32> {
+        let encoded = encode_with_alphabet(sequence, options.alphabet);
+        Self::new(options).inner_probabilities(&encoded)
+    }
+
+    pub fn repeat_units(
+        sequence: &[u8],
+        options: TantanOptions,
+        period: Option<usize>,
+    ) -> Vec<RepeatTract> {
+        let encoded = encode_with_alphabet(sequence, options.alphabet);
+        Self::new(options).inner_repeat_units(&encoded, period)
+    }
+
     fn new(options: TantanOptions) -> Self {
         let (first_gap_prob, other_gap_prob) = options.gap_probabilities();
         Self {
@@ -1448,24 +1446,7 @@ impl Tantan {
         }
     }
 
-    pub fn probabilities(sequence: &[u8], options: TantanOptions) -> Vec<f32> {
-        Self::new(options).inner_probabilities(sequence)
-    }
-
-    pub fn repeat_units(sequence: &[u8], options: TantanOptions) -> Vec<RepeatTract> {
-        Self::new(options).inner_repeat_units(sequence, None)
-    }
-
-    pub fn repeat_units_for_period(
-        sequence: &[u8],
-        options: TantanOptions,
-        period: usize,
-    ) -> Vec<RepeatTract> {
-        Self::new(options).inner_repeat_units(sequence, Some(period))
-    }
-
-    fn inner_probabilities(&self, sequence: &[u8]) -> Vec<f32> {
-        let encoded = encode_with_alphabet(sequence, self.options.alphabet);
+    fn inner_probabilities(&self, encoded: &[u8]) -> Vec<f32> {
         let mut hmm = TantanHmm::new(
             encoded.len(),
             &tables(self.options.alphabet).likelihood,
@@ -1473,15 +1454,14 @@ impl Tantan {
             self.first_gap_prob,
             self.other_gap_prob,
         );
-        hmm.calc_repeat_probs(&encoded)
+        hmm.calc_repeat_probs(encoded)
     }
 
     fn inner_repeat_units(
         &self,
-        sequence: &[u8],
+        encoded: &[u8],
         selected_period: Option<usize>,
     ) -> Vec<RepeatTract> {
-        let encoded = encode_with_alphabet(sequence, self.options.alphabet);
         let hmm = ViterbiHmm::new(
             &tables(self.options.alphabet).log_odds,
             &self.options,
@@ -1491,15 +1471,31 @@ impl Tantan {
         let block_size = (encoded.len() as f64).sqrt().ceil().max(1.0) as usize;
         let level = simd_level();
         let mut tracts = if hmm.has_gaps || level.is_fallback() {
-            let checkpoints = compute_checkpoints(&hmm, &encoded, block_size);
-            traceback(&hmm, &encoded, &checkpoints, block_size, selected_period)
+            let checkpoints = compute_checkpoints(&hmm, encoded, block_size);
+            traceback(&hmm, encoded, &checkpoints, block_size, selected_period)
         } else {
             dispatch!(level, simd => {
-                let checkpoints = compute_checkpoints_simd(simd, &hmm, &encoded, block_size);
-                traceback_simd(simd, &hmm, &encoded, &checkpoints, block_size, selected_period)
+                let checkpoints = compute_checkpoints_simd(simd, &hmm, encoded, block_size);
+                traceback_simd(simd, &hmm, encoded, &checkpoints, block_size, selected_period)
             })
         };
         tracts.retain(|t| t.copy_number >= self.options.min_copy_number);
         tracts
     }
+}
+
+pub fn probabilities_to_intervals(probabilities: &[f32], threshold: f64) -> Vec<(usize, usize)> {
+    let mut intervals = Vec::new();
+    let mut start: Option<usize> = None;
+    for (i, &p) in probabilities.iter().enumerate() {
+        if p as f64 >= threshold {
+            start.get_or_insert(i);
+        } else if let Some(s) = start.take() {
+            intervals.push((s, i));
+        }
+    }
+    if let Some(s) = start {
+        intervals.push((s, probabilities.len()));
+    }
+    intervals
 }
