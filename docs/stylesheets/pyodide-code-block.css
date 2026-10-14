@@ -1,0 +1,275 @@
+/* The runnable Python examples built by `docs/scripts/pyodide_code_block.py`
+   and driven by `docs/javascripts/pyodide-code-block.js`.
+
+   The block inherits Zensical's code-block treatment: geometry from the
+   file-local `--pyodide-code-block-*` properties below, which restate the
+   theme's own code-block values, and colors from the theme's `--md-code-*`.
+   The editor is CodeMirror, whose base theme injects rules at the top of
+   `<head>`, so selectors that must outrank it say so where they appear. */
+
+.md-typeset .pyodide-code-block {
+  --pyodide-code-block-padding: 0.8203125em;
+  --pyodide-code-block-inline-padding: 1.25em;
+  --pyodide-code-block-radius: 0.4rem;
+  --pyodide-code-block-font-size: 0.89em;
+  --pyodide-code-block-focus-width: 0.09rem;
+  --pyodide-code-block-focus-offset: 0.12rem;
+  background-color: var(--md-code-bg-color);
+  border-radius: var(--pyodide-code-block-radius);
+  margin: 1em 0;
+  overflow: hidden;
+  /* Output a new run is about to replace, and the loading pulse's low point.
+     One value, two states. */
+  --pyodide-code-block-dim-opacity: 0.425;
+}
+
+.md-typeset .pyodide-code-block__controls {
+  align-items: center;
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--pyodide-code-block-padding);
+  margin-top: 0;
+  padding: 0.6rem var(--pyodide-code-block-inline-padding);
+}
+
+.md-typeset .pyodide-code-block__timer {
+  color: var(--md-default-fg-color--light);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  margin-right: auto;
+}
+
+.md-typeset .pyodide-code-block__actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.md-typeset .pyodide-code-block__button {
+  margin: 0;
+}
+
+/* Override the theme's pointer cursor for disabled buttons. */
+.md-typeset .pyodide-code-block__button:disabled,
+.md-typeset .pyodide-code-block__button:disabled:focus,
+.md-typeset .pyodide-code-block__button:disabled:hover {
+  color: var(--md-default-fg-color--lightest);
+  cursor: not-allowed;
+}
+
+.md-typeset .pyodide-code-block__button--run:not(:disabled),
+.md-typeset .pyodide-code-block__button--run:not(:disabled):focus,
+.md-typeset .pyodide-code-block__button--run:not(:disabled):hover {
+  background-color: var(--md-accent-fg-color);
+  color: var(--md-accent-bg-color);
+}
+
+/* The shortcut hint renders directly below the run button, so it must not
+   intercept the `pointerleave` that hides it. */
+.pyodide-code-block__tooltip > .md-tooltip2__inner {
+  pointer-events: none;
+}
+
+.md-typeset .pyodide-code-block__editor-frame {
+  padding: var(--pyodide-code-block-padding) var(--pyodide-code-block-inline-padding);
+}
+
+.md-typeset .pyodide-code-block__editor > .highlight,
+.md-typeset .pyodide-code-block__editor > .highlight pre,
+.md-typeset .pyodide-code-block__editor > .highlight pre > code {
+  background-color: transparent;
+  margin: 0;
+  padding: 0;
+}
+
+.md-typeset .pyodide-code-block__editor .cm-editor {
+  background-color: var(--md-code-bg-color);
+  color: var(--md-code-fg-color);
+  font-family: var(--pyodide-code-block-editor-font-family);
+  font-size: var(--pyodide-code-block-editor-font-size);
+  line-height: 1.5;
+}
+
+.md-typeset .pyodide-code-block__editor .cm-editor.cm-focused {
+  outline: none;
+}
+
+/* An editable block's caret is its focus indicator, so the rule above drops
+   the wrapper ring. A non-editable one has no caret and CodeMirror's base
+   theme also sets `outline: none` on `.cm-content`, leaving a keyboard user
+   nothing, so matching its two classes is what wins here. The scope matters
+   as much: a contenteditable element matches `:focus-visible` on mouse focus,
+   so an unscoped rule would ring every editable block on click. */
+.md-typeset
+  .pyodide-code-block[data-editable="false"]
+  .pyodide-code-block__editor
+  .cm-content:focus-visible {
+  outline: var(--pyodide-code-block-focus-width) solid var(--md-accent-fg-color);
+  outline-offset: var(--pyodide-code-block-focus-offset);
+}
+
+.md-typeset
+  .pyodide-code-block[data-editable="false"]
+  .pyodide-code-block__editor
+  .cm-content {
+  caret-color: transparent;
+  cursor: text;
+}
+
+.md-typeset .pyodide-code-block__editor .cm-scroller {
+  font-family: inherit;
+  line-height: inherit;
+  max-height: 36em;
+  overflow: auto;
+}
+
+/* Match the theme's scrollbar treatment for both owned scrollers. `:is()`
+   takes its most specific argument's specificity, so the editor branch gains
+   one element and outranks CodeMirror's own `.cm-scroller` rules. */
+.md-typeset
+  .pyodide-code-block
+  :is(.cm-scroller, .pyodide-code-block__output pre) {
+  scrollbar-color: var(--md-default-fg-color--lighter) #0000;
+  scrollbar-width: thin;
+}
+
+.md-typeset
+  .pyodide-code-block
+  :is(.cm-scroller, .pyodide-code-block__output pre):hover {
+  scrollbar-color: var(--md-accent-fg-color) #0000;
+}
+
+.md-typeset
+  .pyodide-code-block
+  :is(.cm-scroller, .pyodide-code-block__output pre)::-webkit-scrollbar {
+  height: 0.2rem;
+  width: 0.2rem;
+}
+
+.md-typeset
+  .pyodide-code-block
+  :is(.cm-scroller, .pyodide-code-block__output pre)::-webkit-scrollbar-thumb {
+  background-color: var(--md-default-fg-color--lighter);
+}
+
+.md-typeset
+  .pyodide-code-block
+  :is(.cm-scroller, .pyodide-code-block__output
+    pre)::-webkit-scrollbar-thumb:hover {
+  background-color: var(--md-accent-fg-color);
+}
+
+.md-typeset .pyodide-code-block__editor .cm-content {
+  caret-color: var(--md-code-fg-color);
+  min-height: 0;
+  padding: 0;
+}
+
+.md-typeset .pyodide-code-block__editor .cm-line {
+  padding: 0;
+}
+
+.md-typeset .pyodide-code-block__editor .cm-content ::selection {
+  background-color: var(--md-code-hl-color--light);
+}
+
+.md-typeset .pyodide-code-block__editor .cm-matchingBracket {
+  background-color: var(--md-code-hl-color--light);
+  outline: none;
+}
+
+.md-typeset .pyodide-code-block__output.highlight {
+  background-color: var(--md-default-bg-color);
+  border: 0.05rem solid var(--md-code-bg-color);
+  border-bottom-left-radius: var(--pyodide-code-block-radius);
+  border-bottom-right-radius: var(--pyodide-code-block-radius);
+  display: grid;
+  margin-top: calc(-1 * var(--pyodide-code-block-padding));
+  overflow: hidden;
+  padding: var(--pyodide-code-block-padding) var(--pyodide-code-block-inline-padding);
+  /* Holds the panel open at roughly two lines of output, so the first run does
+     not jump the page. Tuned by eye, so it does not reduce to the line height
+     and padding around it. */
+  min-height: 4.425em;
+  transition: height 0.27s cubic-bezier(0.48, 0, 0.52, 1);
+}
+
+.md-typeset
+  .pyodide-code-block__output.highlight
+  pre.pyodide-code-block__output--revealed {
+  animation: pyodide-code-block-reveal 0.22s cubic-bezier(0.48, 0, 0.52, 1)
+    both;
+}
+
+@keyframes pyodide-code-block-reveal {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* Match the output font to the editor and the theme's code blocks. */
+.md-typeset .pyodide-code-block__output.highlight pre {
+  background-color: transparent;
+  display: block;
+  font-size: var(--pyodide-code-block-font-size);
+  margin: 0;
+  /* Allow long lines to scroll instead of expanding the grid item. */
+  min-width: 0;
+  /* Keep horizontal scrolling inside the panel's padding. The panel itself
+     must retain hidden overflow for the height animation. */
+  overflow-x: auto;
+  padding: 0;
+  transition: color 0.22s cubic-bezier(0.48, 0, 0.52, 1);
+}
+
+/* Dim output a new run is about to replace. */
+.md-typeset
+  .pyodide-code-block__output.highlight
+  pre.pyodide-code-block__output--stale {
+  color: var(--md-default-fg-color--light);
+  opacity: var(--pyodide-code-block-dim-opacity);
+}
+
+/* Loading pulse while Pyodide starts. */
+.md-typeset
+  .pyodide-code-block__output.highlight
+  pre.pyodide-code-block__output--loading {
+  align-self: center;
+  animation: pyodide-code-block-loading-pulse 1.5s
+    cubic-bezier(0.48, 0, 0.52, 1) infinite;
+  text-align: center;
+  will-change: opacity;
+}
+
+@keyframes pyodide-code-block-loading-pulse {
+  50% {
+    opacity: var(--pyodide-code-block-dim-opacity);
+  }
+}
+
+/* This panel animates with keyframes as well as transitions, so unlike
+   `modal.css` it disables animations too. `pyodide-code-block.js` repeats the
+   check, because it also skips the measure and reflow behind the height
+   transition. */
+@media (prefers-reduced-motion: reduce) {
+  .md-typeset .pyodide-code-block__output.highlight,
+  .md-typeset .pyodide-code-block__output.highlight pre {
+    transition: none;
+  }
+
+  .md-typeset
+    .pyodide-code-block__output.highlight
+    pre.pyodide-code-block__output--revealed {
+    animation: none;
+  }
+
+  .md-typeset
+    .pyodide-code-block__output.highlight
+    pre.pyodide-code-block__output--loading {
+    animation: none;
+    will-change: auto;
+  }
+}

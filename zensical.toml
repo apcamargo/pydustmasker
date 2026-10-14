@@ -4,15 +4,17 @@ site_description = "Documentation for the pydustmasker library"
 site_author = "Antonio Camargo"
 repo_url = "https://github.com/apcamargo/pydustmasker"
 repo_name = "apcamargo/pydustmasker"
-nav = ["index.md", "theory.md", "api.md"]
+nav = ["index.md", "theory.md", "playground.md", "api.md"]
 extra_css = [
   "stylesheets/extra.css",
+  "stylesheets/pyodide-code-block.css",
   "https://unpkg.com/katex@0/dist/katex.min.css"
 ]
 extra_javascript = [
   "javascripts/katex.js",
   "https://unpkg.com/katex@0/dist/katex.min.js",
-  "https://unpkg.com/katex@0/dist/contrib/auto-render.min.js"
+  "https://unpkg.com/katex@0/dist/contrib/auto-render.min.js",
+  { path = "javascripts/pyodide-code-block.js", type = "module" }
 ]
 
 [project.markdown_extensions.admonition]
@@ -47,6 +49,8 @@ emoji_generator = "zensical.extensions.emoji.to_svg"
 custom_checkbox = true
 
 [project.markdown_extensions.def_list]
+
+[project.markdown_extensions.pyodide_code_block]
 
 [project.plugins.mkdocstrings.handlers.python]
 inventories = ["https://docs.python.org/3/objects.inv"]

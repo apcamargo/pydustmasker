@@ -4,7 +4,7 @@ icon: lucide/rocket
 
 # Quick start
 
-`pydustmasker` is a Python library for efficient identification and masking of [low-complexity regions and tandem repeats](theory#low-complexity-sequences) in nucleotide and protein sequences. Below, we describe the basic steps required to install and use the library. For a complete description of the available functionality, refer to the [API reference](./api).
+`pydustmasker` is a Python library for efficient identification and masking of [low-complexity regions and tandem repeats](theory#low-complexity-sequences) in nucleotide and protein sequences. Below, we describe the basic steps required to install and use the library. For a complete description of the available functionality, refer to the [API reference](./api). To try `pydustmasker` without installing it, use the [Playground](./playground), which runs it in your browser.
 
 ## Installation
 
